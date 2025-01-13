@@ -3,7 +3,6 @@ from tkinter import ttk, messagebox, filedialog
 from PIL import Image, ImageTk, UnidentifiedImageError
 import json
 import os
-import pygame
 
 
 class CardCreatorApp:
@@ -14,9 +13,6 @@ class CardCreatorApp:
         # 창 크기 조정 가능 설정
         self.root.rowconfigure(0, weight=1)
         self.root.columnconfigure(1, weight=1)
-
-        # 소리 초기화
-        pygame.mixer.init()
 
         # GUI 요소들
         tk.Label(root, text="번호:").grid(row=0, column=0, sticky="w")
@@ -72,28 +68,6 @@ class CardCreatorApp:
         tk.Label(root, text="갈림길:").grid(row=9, column=0, sticky="w")
         self.path_spinbox = tk.Spinbox(root, from_=0, to=1000000)
         self.path_spinbox.grid(row=9, column=1, sticky="ew", padx=5, pady=5)
-
-        # 이미지 미리보기 영역
-        tk.Label(root, text="이미지:").grid(row=10, column=0, sticky="w")
-        self.image_label = tk.Label(root, text="이미지 없음", relief="solid", width=15, height=8)
-        self.image_frame = tk.Frame(root, height=256, width=256, relief="solid", bd=1)
-        self.image_frame.grid(row=10, column=1, pady=10)
-        self.image_canvas = tk.Canvas(self.image_frame, width=256, height=256, bg="white")
-        self.image_canvas.pack()
-        tk.Button(root, text="이미지 추가", command=self.add_image).grid(row=10, column=2, padx=5, pady=5)
-
-        
-        # 소리 영역
-        tk.Label(root, text="소리:").grid(row=11, column=0, sticky="w")
-        self.sfx_label = tk.Label(root, text="소리 없음", relief="solid", width=30, height=2)
-        self.sfx_label.grid(row=11, column=1, sticky="nsew", padx=5, pady=5)
-        tk.Button(root, text="소리 추가", command=self.add_sfx).grid(row=11, column=2, padx=5)
-
-        self.play_pause_button = tk.Button(root, text="재생", command=self.toggle_sfx)
-        self.play_pause_button.grid(row=11, column=3, padx=5)
-
-        self.restart_button = tk.Button(root, text="다시듣기", command=self.restart_sfx)
-        self.restart_button.grid(row=11, column=4, padx=5)
 
         # 저장 및 초기화 버튼
         tk.Button(root, text="저장", command=self.save_card).grid(row=12, column=0, pady=5)
@@ -180,75 +154,6 @@ class CardCreatorApp:
             spinbox.pack(side="left", padx=2)
             spinboxes[symbol] = spinbox
 
-    def add_image(self):
-        """사용자의 파일에서 이미지를 불러옴."""
-        file_path = filedialog.askopenfilename(filetypes=[("Image files", "*.png;*.jpg;*.jpeg;*.bmp;*.gif")])
-        if file_path:
-            self.image_path = file_path  # self.character_image_path -> self.image_path 로 수정
-            self.update_image_display(file_path)
-
-
-    def add_sfx(self):
-        """소리 추가."""
-        file_path = filedialog.askopenfilename(filetypes=[("Audio files", "*.mp3;*.wav")])
-        if file_path:
-            self.sfx_path = file_path
-            self.sfx_label.config(text=os.path.basename(file_path))
-            self.is_paused = False  # 새 소리를 추가하면 상태 초기화
-
-    def toggle_sfx(self):
-        """소리 재생/일시정지 토글."""
-        if not self.sfx_path:
-            messagebox.showinfo("정보", "소리를 추가해주세요.")
-            return
-
-        try:
-            if self.is_paused:
-                pygame.mixer.music.unpause()  # 일시정지 상태라면 재개
-                self.play_pause_button.config(text="일시정지")
-                self.is_paused = False
-            else:
-                if pygame.mixer.music.get_busy():
-                    pygame.mixer.music.pause()  # 재생 중이면 일시정지
-                    self.play_pause_button.config(text="재생")
-                    self.is_paused = True
-                else:
-                    pygame.mixer.music.load(self.sfx_path)  # 음악 파일 로드
-                    pygame.mixer.music.play()  # 처음부터 재생
-                    self.play_pause_button.config(text="일시정지")
-                    self.is_paused = False
-        except Exception as e:
-            messagebox.showerror("오류", f"소리를 재생할 수 없습니다: {e}")
-
-
-    def restart_sfx(self):
-        """소리를 처음부터 재생."""
-        if not self.sfx_path:
-            messagebox.showinfo("정보", "소리를 추가해주세요.")
-            return
-
-        try:
-            pygame.mixer.music.stop()  # 현재 재생 중인 소리 정지
-            pygame.mixer.music.load(self.sfx_path)  # 소리 로드
-            pygame.mixer.music.play()  # 처음부터 재생
-            self.play_pause_button.config(text="일시정지")
-            self.is_paused = False
-        except Exception as e:
-            messagebox.showerror("오류", f"소리를 처음부터 재생할 수 없습니다: {e}")
-
-    def update_image_display(self, file_path):
-        """이미지 박스에 이미지를 표시."""
-        try:
-            img = Image.open(file_path)
-            img.thumbnail((256, 256))  # 이미지 크기 조정
-            self.image_tk = ImageTk.PhotoImage(img)
-            self.image_canvas.create_image(128, 128, image=self.image_tk, anchor="center")
-        except UnidentifiedImageError:
-            messagebox.showerror("Error", "이미지 파일을 불러올 수 없습니다.")
-        except Exception as e:
-            messagebox.showerror("Error", f"이미지 표시 중 오류 발생: {e}")
-
-
     def get_detail_effects(self):
         """세부효과 리스트 반환."""
         effects = {}
@@ -267,12 +172,8 @@ class CardCreatorApp:
         card_number = int(self.number_spinbox.get())
         desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
         cards_folder = os.path.join(desktop_path, "Cards")
-        images_folder = os.path.join(cards_folder, "Images")
-        sfxs_folder = os.path.join(cards_folder, "SFX")
         json_folder = os.path.join(cards_folder, "Json")
 
-        os.makedirs(images_folder, exist_ok=True)
-        os.makedirs(sfxs_folder, exist_ok=True)
         os.makedirs(json_folder, exist_ok=True)
 
         # 저장 데이터 구성
@@ -287,30 +188,7 @@ class CardCreatorApp:
             "Symbol_G": self.get_symbols(self.gift_spinboxes),
             "Cultist": int(self.follower_spinbox.get()),
             "Junction": int(self.path_spinbox.get()),
-            "Illust": "",
-            "SFX": "",
         }
-
-        # 이미지 저장
-        if self.image_path:
-            image_dest = os.path.join(images_folder, f"{card_number}.png")
-            try:
-                img = Image.open(self.image_path)
-                img.save(image_dest)
-                card_data["Illust"] = os.path.relpath(image_dest, start=cards_folder)
-            except Exception as e:
-                messagebox.showerror("오류", f"이미지 저장 중 오류 발생: {e}")
-
-        # 사운드 저장
-        if self.sfx_path:
-            ext = os.path.splitext(self.sfx_path)[1].lower()
-            sfx_dest = os.path.join(sfxs_folder, f"{card_number}{ext}")
-            try:
-                with open(self.sfx_path, "rb") as source, open(sfx_dest, "wb") as dest:
-                    dest.write(source.read())
-                    card_data["SFX"] = os.path.relpath(sfx_dest, start=cards_folder)
-            except Exception as e:
-                messagebox.showerror("오류", f"사운드 저장 중 오류 발생: {e}")
 
         # 카드 데이터 JSON으로 저장
         json_path = os.path.join(json_folder, f"{card_number}.json")
@@ -345,15 +223,6 @@ class CardCreatorApp:
         self.follower_spinbox.insert(0, 0)
         self.path_spinbox.delete(0, tk.END)
         self.path_spinbox.insert(0, 0)
-        # 이미지 초기화
-        self.image_canvas.delete("all")
-        self.image_tk = None
-        self.image_path = None
-        # 소리 초기화
-        self.sfx_label.config(text="소리 없음")
-        self.sfx_path = None
-        pygame.mixer.music.stop()  # 현재 재생 중인 소리 정지
-        self.is_paused = False  # 상태 초기화
         messagebox.showinfo("초기화 완료", "모든 필드가 초기화되었습니다.")
         
     def load_json_files(self):
@@ -366,14 +235,15 @@ class CardCreatorApp:
         cards_folder = os.path.join(desktop_path, "Cards")
         os.makedirs(cards_folder, exist_ok=True)
 
-        cards_file = os.path.join(cards_folder, "cards.json")
+        cards_file = os.path.join(cards_folder, "Card_Data.json")
         all_cards = []
 
         # 기존 cards.json 읽기
         if os.path.exists(cards_file):
             with open(cards_file, "r", encoding="utf-8") as file:
                 try:
-                    all_cards = json.load(file)
+                    existing_data = json.load(file)
+                    all_cards = existing_data.get("cards", [])
                 except json.JSONDecodeError:
                     messagebox.showwarning("경고", "기존 cards.json 파일이 손상되었습니다. 새로 생성합니다.")
 
@@ -405,9 +275,10 @@ class CardCreatorApp:
 
         # cards.json에 저장
         with open(cards_file, "w", encoding="utf-8") as file:
-            json.dump(unique_cards, file, ensure_ascii=False, indent=4)
+            json.dump({"cards": unique_cards}, file, ensure_ascii=False, indent=4)
 
         messagebox.showinfo("완료", "JSON 파일이 성공적으로 추가되고 정렬되었습니다.")
+
         
     def load_card(self):
         """JSON 파일을 불러와 데이터를 GUI에 로드."""
@@ -453,27 +324,6 @@ class CardCreatorApp:
             self.path_spinbox.delete(0, tk.END)
             self.path_spinbox.insert(0, card_data.get("Junction", 0))
 
-            # 이미지 로드
-            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-            cards_folder = os.path.join(desktop_path, "Cards")
-            if card_data.get("Illust"):
-                self.image_path = os.path.join(cards_folder, card_data["Illust"])
-                if os.path.exists(self.image_path):
-                    self.update_image_display(self.image_path)
-                else:
-                    self.image_canvas.delete("all")
-                    self.image_tk = None  # 이미지 객체 초기화
-                    self.image_path = None
-
-            # 사운드 로드
-            if card_data.get("SFX"):
-                self.sfx_path = os.path.join(cards_folder, card_data["SFX"])
-                if os.path.exists(self.sfx_path):
-                    self.sfx_label.config(text=os.path.basename(self.sfx_path))
-                else:
-                    self.sfx_label.config(text="소리 없음")
-                    self.sfx_path = None
-
             messagebox.showinfo("완료", "카드 데이터가 성공적으로 로드되었습니다.")
 
         except Exception as e:
@@ -500,8 +350,6 @@ class CardCreatorApp:
                 "Symbol_G": self.get_symbols(self.gift_spinboxes),
                 "Cultist": int(self.follower_spinbox.get()),
                 "Junction": int(self.path_spinbox.get()),
-                "Illust": self.image_path or "",
-                "SFX": self.sfx_path or "",
             }
 
             # JSON 파일에 저장
