@@ -22,7 +22,23 @@ class Config:
             "save": "저장 (.cardpkg)", "json_save": "JSON 저장", "load": "불러오기", 
             "reset": "초기화", "detail_effect": "세부 효과(로직용)",
             "is_root": "루트 카드 여부 (IsRoot)", "religion": "종교 태그 (쉼표로 구분)",
-            "header_info": "기본 정보", "header_stats": "스탯 설정", "header_media": "미디어"
+            "header_info": "기본 정보", "header_stats": "스탯 설정", "header_media": "미디어",
+            "msg_title_error": "오류",
+            "msg_title_saved": "저장",
+            "msg_title_done": "완료",
+            "msg_title_load_ok": "로드 성공",
+            "msg_load_ok": "데이터를 불러왔습니다.",
+            "msg_load_fail": "파일 로드 중 오류: {err}",
+            "msg_id_not_int": "ID는 정수여야 합니다.",
+            "msg_id_negative": "ID는 음수가 될 수 없습니다.",
+            "msg_save_ok": "저장 완료:\n{path}",
+            "msg_pkg_saved": "패키지(JSON 합치기)가 저장되었습니다.",
+            "msg_pkg_fail": "저장 중 오류 발생: {err}",
+            "msg_sound_no_file": "사운드 경로가 비어있습니다.",
+            "msg_sound_missing": "사운드 파일을 찾을 수 없습니다:\n{path}",
+            "msg_sound_play_fail": "사운드 재생 중 오류: {err}",
+            "msg_sound_stop_fail": "사운드 중지 중 오류: {err}",
+            "dlg_merge_select_title": "합칠 JSON 파일을 선택하세요"
         },
         "en": {
             "id": "ID", "name": "Name", "description": "Description", "effect": "Effect Text",
@@ -33,7 +49,23 @@ class Config:
             "save": "Save Package", "json_save": "Save JSON", "load": "Load JSON", 
             "reset": "Reset", "detail_effect": "Detail Effects",
             "is_root": "Is Root Card", "religion": "Religion Tags (comma separated)",
-            "header_info": "Basic Info", "header_stats": "Stats", "header_media": "Media"
+            "header_info": "Basic Info", "header_stats": "Stats", "header_media": "Media",
+            "msg_title_error": "Error",
+            "msg_title_saved": "Saved",
+            "msg_title_done": "Done",
+            "msg_title_load_ok": "Load OK",
+            "msg_load_ok": "Data loaded.",
+            "msg_load_fail": "Error while loading file: {err}",
+            "msg_id_not_int": "ID must be an integer.",
+            "msg_id_negative": "ID cannot be negative.",
+            "msg_save_ok": "Saved:\n{path}",
+            "msg_pkg_saved": "Package (merged JSON) saved.",
+            "msg_pkg_fail": "Error while saving: {err}",
+            "msg_sound_no_file": "Sound path is empty.",
+            "msg_sound_missing": "Sound file not found:\n{path}",
+            "msg_sound_play_fail": "Error while playing sound: {err}",
+            "msg_sound_stop_fail": "Error while stopping sound: {err}",
+            "dlg_merge_select_title": "Select JSON files to merge"
         },
         "ja": {
             "id": "番号 (ID)",
@@ -61,7 +93,23 @@ class Config:
             "religion": "宗教タグ (カンマ区切り)",
             "header_info": "基本情報",
             "header_stats": "ステータス設定",
-            "header_media": "メディア"
+            "header_media": "メディア",
+            "msg_title_error": "エラー",
+            "msg_title_saved": "保存",
+            "msg_title_done": "完了",
+            "msg_title_load_ok": "読み込み成功",
+            "msg_load_ok": "データを読み込みました。",
+            "msg_load_fail": "読み込み中にエラー: {err}",
+            "msg_id_not_int": "IDは整数である必要があります。",
+            "msg_id_negative": "IDは負の値にできません。",
+            "msg_save_ok": "保存完了:\n{path}",
+            "msg_pkg_saved": "パッケージ(JSON結合)を保存しました。",
+            "msg_pkg_fail": "保存中にエラー: {err}",
+            "msg_sound_no_file": "サウンドパスが空です。",
+            "msg_sound_missing": "サウンドファイルが見つかりません:\n{path}",
+            "msg_sound_play_fail": "サウンド再生中にエラー: {err}",
+            "msg_sound_stop_fail": "サウンド停止中にエラー: {err}",
+            "dlg_merge_select_title": "結合するJSONファイルを選択してください"
         },
         "zh": {
             "id": "编号 (ID)",
@@ -89,7 +137,23 @@ class Config:
             "religion": "宗教标签（逗号分隔）",
             "header_info": "基本信息",
             "header_stats": "属性设置",
-            "header_media": "媒体"
+            "header_media": "媒体",
+            "msg_title_error": "错误",
+            "msg_title_saved": "已保存",
+            "msg_title_done": "完成",
+            "msg_title_load_ok": "加载成功",
+            "msg_load_ok": "已加载数据。",
+            "msg_load_fail": "加载文件时出错: {err}",
+            "msg_id_not_int": "ID 必须是整数。",
+            "msg_id_negative": "ID 不能为负数。",
+            "msg_save_ok": "保存完成:\n{path}",
+            "msg_pkg_saved": "已保存包（合并 JSON）。",
+            "msg_pkg_fail": "保存时出错: {err}",
+            "msg_sound_no_file": "音频路径为空。",
+            "msg_sound_missing": "找不到音频文件:\n{path}",
+            "msg_sound_play_fail": "播放音频时出错: {err}",
+            "msg_sound_stop_fail": "停止音频时出错: {err}",
+            "dlg_merge_select_title": "选择要合并的 JSON 文件"
         }
     }
 
@@ -97,7 +161,7 @@ class CardCreatorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Cultist Simulator Card Creator")
-        self.root.geometry("530x1060")
+        self.root.geometry("550x1060")
 
         # 상태 변수 초기화
         self.current_lang = "ko"
@@ -139,6 +203,10 @@ class CardCreatorApp:
         # 심볼 변수 (순서대로 6개)
         self.symbol_vars_r = [tk.IntVar(value=0) for _ in range(6)]
         self.symbol_vars_g = [tk.IntVar(value=0) for _ in range(6)]
+        
+        # Religion 체크박스 변수 (UI 생성 전에 준비)
+        self.rel_vars = {rel: tk.BooleanVar(value=False) for rel in ["None", "Isl", "Cri", "Gre", "Pho"]}
+        self.rel_vars["None"].set(True)
 
     def _create_menu(self):
         """상단 언어 선택 메뉴"""
@@ -211,10 +279,6 @@ class CardCreatorApp:
 
         rel_frame = tk.Frame(frame)
         rel_frame.grid(row=1, column=3, sticky="w", padx=5)
-
-		# 종교 목록 정의 및 변수 생성 (클래스 __init__ 혹은 적절한 위치에 미리 정의되어 있어야 함)
-        self.rel_vars = {rel: tk.BooleanVar(value=False) for rel in ["None", "Isl", "Cri", "Gre", "Pho"]}
-        self.rel_vars["None"].set(True) 
 
         self.rel_chk_btns = {}
         for rel in ["None", "Isl", "Cri", "Gre", "Pho"]:
@@ -362,6 +426,7 @@ class CardCreatorApp:
             "中文": "zh",
         }
         lang_code = lang_map.get(selection, "ko")
+        self.current_lang = lang_code
         L = Config.LANGUAGES[lang_code]
         
         # 라벨 텍스트 업데이트
@@ -411,19 +476,48 @@ class CardCreatorApp:
             self.var_sound_path.set(path)
 
     def play_sound(self):
-        path = self.var_sound_path.get()
-        if path and os.path.exists(path):
-            try:
-                pygame.mixer.music.load(path)
-                pygame.mixer.music.play()
-            except Exception as e:
-                print(e)
+        path = self.var_sound_path.get().strip()
+        if not path:
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_sound_no_file"))
+            return
+        if not os.path.exists(path):
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_sound_missing", path=path))
+            return
+
+        try:
+            pygame.mixer.music.load(path)
+            pygame.mixer.music.play()
+        except Exception as e:
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_sound_play_fail", err=e))
 
     def reset_all(self):
-        self._init_variables()
+        # 변수 객체는 재생성하지 말고 값만 초기화
+        self.var_id.set(0)
+        self.var_name.set("")
+        self.var_species.set("일반")
+        self.var_cultist.set(0)
+        self.var_junction.set(0)
+        self.var_is_root.set(False)
+        self.var_religion.set("")
+        self.var_image_path.set("")
+        self.var_sound_path.set("")
+        
+        for v in self.symbol_vars_r:
+            v.set(0)
+            for v in self.symbol_vars_g:
+                v.set(0)
+
+        # Religion 체크박스 초기화
+        for k in self.rel_vars:
+            self.rel_vars[k].set(False)
+        self.rel_vars["None"].set(True)
+        
+        # 텍스트/이미지 UI 초기화
         self.txt_desc.delete("1.0", tk.END)
         self.txt_effect.delete("1.0", tk.END)
         self.lbl_preview_img.config(image=None, text="No Image")
+        self.image_ref = None
+
         self.update_preview()
 
     def load_json(self):
@@ -443,6 +537,28 @@ class CardCreatorApp:
             
             # Religion 리스트 -> 문자열
             rel = data.get("Religion", [])
+                        
+                        # Religion 체크박스 동기화
+            if isinstance(rel, str):
+                rel_list = [x.strip() for x in rel.split(",") if x.strip()]
+            elif isinstance(rel, list):
+                rel_list = [str(x).strip() for x in rel if str(x).strip()]
+            else:
+                rel_list = []
+
+            # 전부 초기화 후 적용
+            for k in self.rel_vars:
+                self.rel_vars[k].set(False)
+
+            any_selected = False
+            for k in rel_list:
+                if k in self.rel_vars and k != "None":
+                    self.rel_vars[k].set(True)
+                    any_selected = True
+
+            # 아무 것도 없으면 None
+            self.rel_vars["None"].set(not any_selected)
+            
             self.var_religion.set(", ".join(rel) if isinstance(rel, list) else str(rel))
             
             # Symbol 배열 매핑
@@ -458,25 +574,60 @@ class CardCreatorApp:
             self.txt_effect.insert("1.0", data.get("effect", ""))
             
             self.update_preview()
-            messagebox.showinfo("로드 성공", "데이터를 불러왔습니다.")
+            messagebox.showinfo(self._t("msg_title_load_ok"), self._t("msg_load_ok"))
             
         except Exception as e:
-            messagebox.showerror("오류", f"파일 로드 중 오류: {e}")
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_load_fail", err=e))
 
     def save_json_file(self):
         data = self.get_current_data()
-        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON", "*.json")])
-        if path:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=4)
-            messagebox.showinfo("저장", "JSON 저장 완료")
+        
+        raw_id = str(self.var_id.get()).strip()
+
+        try:
+            card_id = int(raw_id)
+        except ValueError:
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_id_not_int"))
+            return
+
+        if card_id < 0:
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_id_negative"))
+            return
+
+        dirs = self._ensure_cards_dirs()
+        
+        # 1) 이미지/사운드: Cards/Images, Cards/Sounds로 복사 (파일명은 id)
+        img_src = self.var_image_path.get().strip()
+        if img_src and os.path.exists(img_src):
+            img_ext = os.path.splitext(img_src)[1] or ".png"
+            img_dst = os.path.join(dirs["images"], f"{card_id}{img_ext}")
+            shutil.copy2(img_src, img_dst)
+            # JSON에 기록(선택): 상대경로로 저장
+            data["image_path"] = os.path.relpath(img_dst, dirs["root"]).replace("\\", "/")
+            self.var_image_path.set(img_dst)
+
+        snd_src = self.var_sound_path.get().strip()
+        if snd_src and os.path.exists(snd_src):
+            snd_ext = os.path.splitext(snd_src)[1] or ".mp3"
+            snd_dst = os.path.join(dirs["sounds"], f"{card_id}{snd_ext}")
+            shutil.copy2(snd_src, snd_dst)
+            data["sound_path"] = os.path.relpath(snd_dst, dirs["root"]).replace("\\", "/")
+            self.var_sound_path.set(snd_dst)
+
+        # 2) JSON: Cards/JSON/{id}.json 로 저장
+        json_path = os.path.join(dirs["json"], f"{card_id}.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+        messagebox.showinfo(self._t("msg_title_saved"), self._t("msg_save_ok", path=json_path))
 
     def save_package(self):
         """여러 JSON을 선택하여 하나의 JSON으로 합쳐 저장"""
         json_paths = filedialog.askopenfilenames(
-            title="합칠 JSON 파일을 선택하세요",
+            title=self._t("dlg_merge_select_title"),
             filetypes=[("JSON", "*.json")]
         )
+
         if not json_paths:
             return
 
@@ -499,9 +650,9 @@ class CardCreatorApp:
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(out, f, ensure_ascii=False, indent=4)
 
-            messagebox.showinfo("완료", "패키지(JSON 합치기)가 저장되었습니다.")
+            messagebox.showinfo(self._t("msg_title_done"), self._t("msg_pkg_saved"))
         except Exception as e:
-            messagebox.showerror("오류", f"저장 중 오류 발생: {e}")
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_pkg_fail", err=e))
             
     def _on_religion_change(self, changed_rel: str):
     # None은 단독 선택(다른 것과 공존 불가) 규칙 예시
@@ -519,7 +670,35 @@ class CardCreatorApp:
                 self.rel_vars["None"].set(True)
                 
         self.update_preview()
+        
+    def _cards_root_dir(self) -> str:
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        return os.path.join(desktop, "Cards")
+    
+    def _ensure_cards_dirs(self) -> dict:
+        root = self._cards_root_dir()
+        paths={
+            "root": root,
+            "json": os.path.join(root, "JSON"),
+            "images": os.path.join(root,"Images"),
+            "sounds": os.path.join(root,"Sounds"),
+        }
+        for p in paths.values():
+            os.makedirs(p, exist_ok=True)
+        return paths
+    
+    def _L(self) -> dict:
+        return Config.LANGUAGES.get(self.current_lang, Config.LANGUAGES["ko"])
+    
+    def _t(self, key: str, **kwargs) -> str:
+        s = self._L().get(key, key)
+        return s.format(**kwargs) if kwargs else s
 
+    def stop_sound(self):
+        try:
+            pygame.mixer.music.stop()
+        except Exception as e:
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_sound_stop_fail", err=e))
 
 if __name__ == "__main__":
     root = tk.Tk()
