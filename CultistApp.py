@@ -174,6 +174,8 @@ class Config:
 class CardCreatorApp:
     def __init__(self, root):
         self.root = root
+        self.save_mode = "single"  # "single" 또는 "db"
+        self.loaded_card_id = None  # 불러온 카드의 원래 id (id 변경 감지용)
         self.root.title("Cultist Simulator Card Creator")
         self.root.geometry("620x900")
 
@@ -521,6 +523,8 @@ class CardCreatorApp:
 
     def reset_all(self):
         # 변수 객체는 재생성하지 말고 값만 초기화
+        self.loaded_card_id = None
+        self.save_mode = "single"
         self.var_id.set(0)
         self.var_name.set("")
         self.var_species.set("일반")
@@ -533,8 +537,8 @@ class CardCreatorApp:
         
         for v in self.symbol_vars_r:
             v.set(0)
-            for v in self.symbol_vars_g:
-                v.set(0)
+        for v in self.symbol_vars_g:
+            v.set(0)
 
         # Religion 체크박스 초기화
         for k in self.rel_vars:
@@ -555,68 +559,59 @@ class CardCreatorApp:
         if not file_path:
             return
 
-        def _pick_card(obj):
-            cards = self._extract_cards(obj)  # 단일/패키지/배열 모두 지원
-            if not cards:
-                return obj if isinstance(obj, dict) else {}
-
-            if len(cards) == 1:
-                return cards[0]
-
-            # 여러 장이면: (1) 파일명이 숫자면 그 id 우선, 아니면 (2) 현재 UI의 id 우선, 아니면 (3) 첫 번째
-            target_id = None
-            base = os.path.splitext(os.path.basename(file_path))[0]
-            if base.isdigit():
-                target_id = int(base)
-            else:
-                try:
-                    target_id = int(self.var_id.get())
-                except Exception:
-                    target_id = None
-
-            if target_id is not None:
-                for c in cards:
-                    try:
-                        if int(c.get("id")) == target_id:
-                            return c
-                    except Exception:
-                        pass
-            return cards[0]
-
-        def _resolve_path(p: str, cards_root: str) -> str:
-            p = (p or "").strip()
-            if not p:
-                return ""
-            if os.path.isabs(p) and os.path.exists(p):
-                return p
-
-            # 1) Cards 루트 기준(Images/.., Sounds/..)
-            cand1 = os.path.join(cards_root, p)
-            if os.path.exists(cand1):
-                return cand1
-
-            # 2) JSON 파일 위치 기준(예: 같은 폴더에 리소스가 있는 경우)
-            cand2 = os.path.join(os.path.dirname(file_path), p)
-            if os.path.exists(cand2):
-                return cand2
-
-            # 못 찾으면 원문 유지
-            return p
+        fname = os.path.basename(file_path).lower()
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 obj = json.load(f)
-                
-                # 불러온 파일이 패키지/배열 형태면 이후 저장 시 이 파일에 덮어쓰기하도록 경로 기억
+
+            # 단일/패키지/배열 모두 카드 리스트로 추출
             cards = self._extract_cards(obj)
-            # 단일 카드 dict(또는 cards가 비어도 dict이면)도 "불러온 파일에 저장" 대상으로 기억
-            self.loaded_db_path = file_path if (cards or isinstance(obj, dict)) else None
 
-            data = _pick_card(obj)  # 기존 카드 선택 로직은 그대로
+            # 저장 모드 결정
+            # - CardDB.json을 열면 DB 모드
+            # - 그 외는 single 모드(0.json 등 단일 카드 파일 포함)
+            if fname == "carddb.json":
+                self.save_mode = "db"
+                self.loaded_db_path = file_path
+            else:
+                self.save_mode = "single"
+                self.loaded_db_path = file_path
 
-            # Cards 기준 경로 준비
-            dirs = self._ensure_cards_dirs()
-            cards_root = dirs["root"]
+            # 어떤 카드 1장을 UI에 반영할지 선택
+            def _pick_card():
+                if not cards:
+                    return obj if isinstance(obj, dict) else {}
+                if len(cards) == 1:
+                    return cards[0]
+
+                # 여러 장이면: 파일명이 숫자면 그 id 우선, 아니면 현재 UI id 우선, 아니면 첫 번째
+                target_id = None
+                base = os.path.splitext(os.path.basename(file_path))[0]
+                if base.isdigit():
+                    target_id = int(base)
+                else:
+                    try:
+                        target_id = int(self.var_id.get())
+                    except Exception:
+                        target_id = None
+
+                if target_id is not None:
+                    for c in cards:
+                        try:
+                            if int(c.get("id")) == target_id:
+                                return c
+                        except Exception:
+                            pass
+                return cards[0]
+
+            data = _pick_card()
+
+            # 불러온 카드의 원래 id 저장(이후 id 변경 감지용)
+            try:
+                self.loaded_card_id = int(data.get("id", 0))
+            except Exception:
+                self.loaded_card_id = None
 
             # 기본 데이터 매핑
             self.var_id.set(int(data.get("id", 0)))
@@ -625,9 +620,8 @@ class CardCreatorApp:
             self.var_junction.set(int(data.get("junction", 0)))
             self.var_is_root.set(bool(data.get("IsRoot", 0)))
 
-            # Religion: 리스트/문자열 모두 지원 + 체크박스 동기화
+            # Religion 체크박스 동기화 (None 규칙 포함)
             rel = data.get("Religion", [])
-
             if isinstance(rel, list):
                 rel_list = [str(x).strip() for x in rel if str(x).strip()]
             elif isinstance(rel, str):
@@ -650,10 +644,8 @@ class CardCreatorApp:
             sym_r = data.get("symbol_R", [0] * 6)
             sym_g = data.get("symbol_G", [0] * 6)
             for i in range(6):
-                if i < len(sym_r):
-                    self.symbol_vars_r[i].set(int(sym_r[i]))
-                if i < len(sym_g):
-                    self.symbol_vars_g[i].set(int(sym_g[i]))
+                self.symbol_vars_r[i].set(int(sym_r[i]) if i < len(sym_r) else 0)
+                self.symbol_vars_g[i].set(int(sym_g[i]) if i < len(sym_g) else 0)
 
             # 텍스트
             self.txt_desc.delete("1.0", tk.END)
@@ -662,12 +654,10 @@ class CardCreatorApp:
             self.txt_effect.delete("1.0", tk.END)
             self.txt_effect.insert("1.0", data.get("effect", ""))
 
-            # 이미지/사운드: 새 Cards 루트 기준으로 로드
-            # JSON에는 image_path/sound_path가 없으므로, id 기반으로 계산
+            # 이미지/사운드: JSON에 경로가 없으므로 id 기반으로 탐색
             dirs = self._ensure_cards_dirs()
             card_id = int(data.get("id", 0))
 
-            # 이미지: id.* 중 존재하는 첫 파일 사용
             img_path = ""
             for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
                 cand = os.path.join(dirs["images"], f"{card_id}{ext}")
@@ -675,7 +665,6 @@ class CardCreatorApp:
                     img_path = cand
                     break
 
-            # 사운드: id.* 중 존재하는 첫 파일 사용
             snd_path = ""
             for ext in (".wav", ".mp3", ".ogg"):
                 cand = os.path.join(dirs["sounds"], f"{card_id}{ext}")
@@ -684,7 +673,7 @@ class CardCreatorApp:
                     break
 
             self.var_image_path.set(img_path)
-            if img_path and os.path.exists(img_path):
+            if img_path:
                 self._load_preview_image(img_path)
             else:
                 self.image_ref = None
@@ -701,9 +690,8 @@ class CardCreatorApp:
     def save_json_file(self):
         try:
             data = self.get_current_data()
-            
-            raw_id = str(self.var_id.get()).strip()
 
+            raw_id = str(self.var_id.get()).strip()
             try:
                 card_id = int(raw_id)
             except ValueError:
@@ -715,17 +703,45 @@ class CardCreatorApp:
                 return
 
             dirs = self._ensure_cards_dirs()
-            
-            # 저장 대상:
-            # - DB/패키지 파일을 불러온 상태면 그 파일에 덮어쓰기 저장
-            # - 아니면 기본: Desktop/Cards/DB/CardDB.json
+
+            # 기본 저장 경로
+            json_dir = os.path.join(dirs["root"], "JSON")
+            os.makedirs(json_dir, exist_ok=True)
+            default_single_path = os.path.join(json_dir, f"{card_id}.json")
+
             db_dir = os.path.join(dirs["root"], "DB")
             os.makedirs(db_dir, exist_ok=True)
             default_db_path = os.path.join(db_dir, "CardDB.json")
 
-            target_path = self.loaded_db_path if self.loaded_db_path else default_db_path
-                
+            # 저장 모드에 따라 target_path 결정
+            if getattr(self, "save_mode", "single") == "db":
+                # DB 모드: 불러온 DB가 있으면 그 파일, 없으면 기본 CardDB.json
+                target_path = self.loaded_db_path if self.loaded_db_path else default_db_path
+            else:
+                # 단일 모드: 불러온 단일 json이 있으면 그 파일에 저장,
+                # 단, id가 바뀌면 JSON 폴더에 새 이름으로 저장
+                old_id = self.loaded_card_id
+                if self.loaded_db_path and old_id is not None and card_id == old_id:
+                    target_path = self.loaded_db_path
+                else:
+                    target_path = default_single_path
+
+            # 2) 단일 카드 파일(예: 0.json)을 불러온 상태에서 id가 바뀌면 -> 새 id 이름으로 저장
+            if self.loaded_db_path:
+                base = os.path.splitext(os.path.basename(self.loaded_db_path))[0]
+                is_single_card_file = base.isdigit()  # 0.json, 12.json 같은 케이스
+                if is_single_card_file and old_id is not None and card_id != old_id:
+                    target_path = os.path.join(os.path.dirname(self.loaded_db_path), f"{card_id}.json")
+
+            # JSON에는 image_path/sound_path를 넣지 않음 (혹시 포함돼도 제거)
+            data.pop("image_path", None)
+            data.pop("sound_path", None)
+
+            # ---------- 리소스 저장(권장: ID 변경 시 old id 리소스 정리) ----------
+            # 이미지
             img_src = self.var_image_path.get().strip()
+            img_ext = None
+            img_dst = None
             if img_src and os.path.exists(img_src):
                 img_ext = os.path.splitext(img_src)[1] or ".png"
                 img_dst = os.path.join(dirs["images"], f"{card_id}{img_ext}")
@@ -735,7 +751,10 @@ class CardCreatorApp:
 
                 self.var_image_path.set(img_dst)
 
+            # 사운드
             snd_src = self.var_sound_path.get().strip()
+            snd_ext = None
+            snd_dst = None
             if snd_src and os.path.exists(snd_src):
                 snd_ext = os.path.splitext(snd_src)[1] or ".mp3"
                 snd_dst = os.path.join(dirs["sounds"], f"{card_id}{snd_ext}")
@@ -745,6 +764,24 @@ class CardCreatorApp:
 
                 self.var_sound_path.set(snd_dst)
 
+            # ID 변경 시: old id 리소스 파일 제거(동일 확장자만)
+            if old_id is not None and old_id != card_id:
+                if img_ext:
+                    old_img = os.path.join(dirs["images"], f"{old_id}{img_ext}")
+                    if img_dst and os.path.exists(old_img) and os.path.abspath(old_img) != os.path.abspath(img_dst):
+                        try:
+                            os.remove(old_img)
+                        except Exception:
+                            pass
+
+                if snd_ext:
+                    old_snd = os.path.join(dirs["sounds"], f"{old_id}{snd_ext}")
+                    if snd_dst and os.path.exists(old_snd) and os.path.abspath(old_snd) != os.path.abspath(snd_dst):
+                        try:
+                            os.remove(old_snd)
+                        except Exception:
+                            pass
+            # ---------------------------------------------------------------
 
             # 기존 카드 로드(없으면 빈 리스트)
             existing_cards = []
@@ -756,16 +793,33 @@ class CardCreatorApp:
                 except Exception:
                     existing_cards = []
 
+            # DB/패키지 파일에 저장하는 경우: id가 변경되었으면 "이전 id 항목" 제거 후 병합
+            if old_id is not None and card_id != old_id:
+                filtered = []
+                for c in existing_cards:
+                    try:
+                        if int(c.get("id")) == int(old_id):
+                            continue
+                    except Exception:
+                        pass
+                    filtered.append(c)
+                existing_cards = filtered
+
             # 현재 카드 1장(data)을 id 기준으로 덮어쓰기 병합 + id 정렬
             merged_cards = self._merge_cards_by_id(existing_cards, [data])
             out = {"cards": merged_cards}
 
             with open(target_path, "w", encoding="utf-8") as f:
                 json.dump(out, f, ensure_ascii=False, indent=4)
+                
+            self.loaded_card_id = card_id
+            self.loaded_db_path = target_path
+            # 단일 저장이면 single 유지, DB 저장이면 db 유지(이미 save_mode로 관리)
 
             messagebox.showinfo(self._t("msg_title_saved"), self._t("msg_save_ok", path=target_path))
         except Exception as e:
             messagebox.showerror(self._t("msg_title_error"), self._t("msg_pkg_fail", err=e))
+
 
     def save_package(self):
         """여러 JSON(단일 카드 / cards 패키지 / 카드 배열)을 하나의 패키지로 병합하여 자동 저장
