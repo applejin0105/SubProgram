@@ -691,6 +691,7 @@ class CardCreatorApp:
         try:
             data = self.get_current_data()
 
+            # --- ID 검증: 정수만, 음수 금지 ---
             raw_id = str(self.var_id.get()).strip()
             try:
                 card_id = int(raw_id)
@@ -704,7 +705,7 @@ class CardCreatorApp:
 
             dirs = self._ensure_cards_dirs()
 
-            # 기본 저장 경로
+            # --- 기본 저장 경로(이름 통일) ---
             json_dir = os.path.join(dirs["root"], "JSON")
             os.makedirs(json_dir, exist_ok=True)
             default_single_path = os.path.join(json_dir, f"{card_id}.json")
@@ -713,55 +714,57 @@ class CardCreatorApp:
             os.makedirs(db_dir, exist_ok=True)
             default_db_path = os.path.join(db_dir, "cardDB.json")
 
-            # 저장 모드에 따라 target_path 결정
-            if getattr(self, "save_mode", "single") == "db":
+            # --- 저장 관련 상태 ---
+            old_id = getattr(self, "loaded_card_id", None)
+            loaded_path = getattr(self, "loaded_db_path", None)
+            save_mode = getattr(self, "save_mode", "single")
+
+            # --- old_json_path_to_delete: 단일 모드 + 숫자.json 로드 + ID 변경인 경우에만 ---
+            old_json_path_to_delete = None
+            is_loaded_numeric_json = False
+            if save_mode == "single" and loaded_path:
+                base = os.path.splitext(os.path.basename(loaded_path))[0]
+                is_loaded_numeric_json = base.isdigit()
+
+            if save_mode == "single" and is_loaded_numeric_json and old_id is not None and card_id != old_id:
+                old_json_path_to_delete = loaded_path  # 저장 성공 후에만 삭제 시도
+
+            # --- target_path 결정: 딱 한 번만 ---
+            if save_mode == "db":
                 # DB 모드: 불러온 DB가 있으면 그 파일, 없으면 기본 cardDB.json
-                target_path = self.loaded_db_path if self.loaded_db_path else default_db_path
+                target_path = loaded_path if loaded_path else default_db_path
             else:
-                # 단일 모드: 불러온 단일 json이 있으면 그 파일에 저장,
-                # 단, id가 바뀌면 JSON 폴더에 새 이름으로 저장
-                old_id = self.loaded_card_id
-                if self.loaded_db_path and old_id is not None and card_id == old_id:
-                    target_path = self.loaded_db_path
+                # 단일 모드:
+                # - ID가 바뀌지 않았고, 불러온 파일이 있으면 그 파일에 덮어쓰기
+                # - 그 외(새 카드 or ID 변경)는 JSON 폴더의 {id}.json로 저장
+                if loaded_path and old_id is not None and card_id == old_id:
+                    target_path = loaded_path
                 else:
                     target_path = default_single_path
 
-            # 2) 단일 카드 파일(예: 0.json)을 불러온 상태에서 id가 바뀌면 -> 새 id 이름으로 저장
-            if self.loaded_db_path:
-                base = os.path.splitext(os.path.basename(self.loaded_db_path))[0]
-                is_single_card_file = base.isdigit()  # 0.json, 12.json 같은 케이스
-                if is_single_card_file and old_id is not None and card_id != old_id:
-                    target_path = os.path.join(os.path.dirname(self.loaded_db_path), f"{card_id}.json")
-
-            # JSON에는 image_path/sound_path를 넣지 않음 (혹시 포함돼도 제거)
+            # JSON에는 image_path/sound_path를 넣지 않음
             data.pop("image_path", None)
             data.pop("sound_path", None)
 
             # ---------- 리소스 저장(권장: ID 변경 시 old id 리소스 정리) ----------
-            # 이미지
             img_src = self.var_image_path.get().strip()
             img_ext = None
             img_dst = None
             if img_src and os.path.exists(img_src):
                 img_ext = os.path.splitext(img_src)[1] or ".png"
                 img_dst = os.path.join(dirs["images"], f"{card_id}{img_ext}")
-
                 if os.path.abspath(img_src) != os.path.abspath(img_dst):
                     shutil.copy2(img_src, img_dst)
-
                 self.var_image_path.set(img_dst)
 
-            # 사운드
             snd_src = self.var_sound_path.get().strip()
             snd_ext = None
             snd_dst = None
             if snd_src and os.path.exists(snd_src):
                 snd_ext = os.path.splitext(snd_src)[1] or ".mp3"
                 snd_dst = os.path.join(dirs["sounds"], f"{card_id}{snd_ext}")
-
                 if os.path.abspath(snd_src) != os.path.abspath(snd_dst):
                     shutil.copy2(snd_src, snd_dst)
-
                 self.var_sound_path.set(snd_dst)
 
             # ID 변경 시: old id 리소스 파일 제거(동일 확장자만)
@@ -793,8 +796,8 @@ class CardCreatorApp:
                 except Exception:
                     existing_cards = []
 
-            # DB/패키지 파일에 저장하는 경우: id가 변경되었으면 "이전 id 항목" 제거 후 병합
-            if old_id is not None and card_id != old_id:
+            # DB 모드일 때만: ID 변경이면 이전 id 항목 제거 (old_id 남는 것 방지)
+            if save_mode == "db" and old_id is not None and card_id != old_id:
                 filtered = []
                 for c in existing_cards:
                     try:
@@ -805,21 +808,30 @@ class CardCreatorApp:
                     filtered.append(c)
                 existing_cards = filtered
 
-            # 현재 카드 1장(data)을 id 기준으로 덮어쓰기 병합 + id 정렬
+            # 병합(동일 id면 덮어쓰기) + id 정렬
             merged_cards = self._merge_cards_by_id(existing_cards, [data])
             out = {"cards": merged_cards}
 
             with open(target_path, "w", encoding="utf-8") as f:
                 json.dump(out, f, ensure_ascii=False, indent=4)
-                
+
+            # 저장 성공 후: 조건에 맞을 때만 기존 단일 json 제거
+            if old_json_path_to_delete:
+                try:
+                    if os.path.exists(old_json_path_to_delete) and \
+                    os.path.abspath(old_json_path_to_delete) != os.path.abspath(target_path):
+                        os.remove(old_json_path_to_delete)
+                except Exception:
+                    pass
+
+            # 저장 후 상태 갱신
             self.loaded_card_id = card_id
             self.loaded_db_path = target_path
-            # 단일 저장이면 single 유지, DB 저장이면 db 유지(이미 save_mode로 관리)
 
             messagebox.showinfo(self._t("msg_title_saved"), self._t("msg_save_ok", path=target_path))
+
         except Exception as e:
             messagebox.showerror(self._t("msg_title_error"), self._t("msg_pkg_fail", err=e))
-
 
     def save_package(self):
         """여러 JSON(단일 카드 / cards 패키지 / 카드 배열)을 하나의 패키지로 병합하여 자동 저장
