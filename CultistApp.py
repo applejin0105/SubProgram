@@ -1,11 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageOps
 import shutil
 import json
 import os
-import zipfile
-import tempfile
 import pygame
 
 # --- 설정 및 데이터 ---
@@ -14,7 +12,7 @@ class Config:
     
     LANGUAGES = {
         "ko": {
-            "id": "번호 (ID)", "name": "이름", "description": "설명", "effect": "효과 텍스트",
+            "id": "번호 (ID)", "name": "이름", "description": "설명", "effect": "효과",
             "auto_analyze": "자동 분석", "species": "종족", "require_symbol": "요구 심볼",
             "gift_symbol": "제공 심볼", "cultist": "신도 수", "junction": "갈림길",
             "image_path": "이미지 경로", "sound_path": "사운드 경로",
@@ -38,10 +36,14 @@ class Config:
             "msg_sound_missing": "사운드 파일을 찾을 수 없습니다:\n{path}",
             "msg_sound_play_fail": "사운드 재생 중 오류: {err}",
             "msg_sound_stop_fail": "사운드 중지 중 오류: {err}",
-            "dlg_merge_select_title": "합칠 JSON 파일을 선택하세요"
+            "dlg_merge_select_title": "합칠 JSON 파일을 선택하세요",
+            "msg_pkg_saved_auto": "CardDB.json 저장 완료:\n{path}",
+            "msg_pkg_saved_with_overwrites": "CardDB.json 저장 완료:\n{path}\n\n중복 ID {count}건이 덮어쓰기 되었습니다.\n{detail}",
+            "msg_pkg_overwrite_more": "... 외 {n}건 더 있습니다.",
+            "msg_pkg_src_unknown": "(알 수 없음)"
         },
         "en": {
-            "id": "ID", "name": "Name", "description": "Description", "effect": "Effect Text",
+            "id": "ID", "name": "Name", "description": "Description", "effect": "Effect",
             "auto_analyze": "Auto Analyze", "species": "Species", "require_symbol": "Required Symbols",
             "gift_symbol": "Gifted Symbols", "cultist": "Cultists", "junction": "Junction",
             "image_path": "Image Path", "sound_path": "Sound Path",
@@ -65,13 +67,17 @@ class Config:
             "msg_sound_missing": "Sound file not found:\n{path}",
             "msg_sound_play_fail": "Error while playing sound: {err}",
             "msg_sound_stop_fail": "Error while stopping sound: {err}",
-            "dlg_merge_select_title": "Select JSON files to merge"
+            "dlg_merge_select_title": "Select JSON files to merge",
+            "msg_pkg_saved_auto": "Saved CardDB.json:\n{path}",
+            "msg_pkg_saved_with_overwrites": "Saved CardDB.json:\n{path}\n\nOverwrote {count} duplicate ID(s).\n{detail}",
+            "msg_pkg_overwrite_more": "... and {n} more.",
+            "msg_pkg_src_unknown": "(unknown)"
         },
         "ja": {
             "id": "番号 (ID)",
             "name": "名前",
             "description": "説明",
-            "effect": "効果テキスト",
+            "effect": "効果",
             "auto_analyze": "自動分析",
             "species": "種族",
             "require_symbol": "要求シンボル",
@@ -109,13 +115,17 @@ class Config:
             "msg_sound_missing": "サウンドファイルが見つかりません:\n{path}",
             "msg_sound_play_fail": "サウンド再生中にエラー: {err}",
             "msg_sound_stop_fail": "サウンド停止中にエラー: {err}",
-            "dlg_merge_select_title": "結合するJSONファイルを選択してください"
+            "dlg_merge_select_title": "結合するJSONファイルを選択してください",
+            "msg_pkg_saved_auto": "CardDB.json を保存しました:\n{path}",
+            "msg_pkg_saved_with_overwrites": "CardDB.json を保存しました:\n{path}\n\n重複ID {count}件を上書きしました。\n{detail}",
+            "msg_pkg_overwrite_more": "... 他 {n}件",
+            "msg_pkg_src_unknown": "(不明)"
         },
         "zh": {
             "id": "编号 (ID)",
             "name": "名称",
             "description": "描述",
-            "effect": "效果文本",
+            "effect": "效果",
             "auto_analyze": "自动分析",
             "species": "种族",
             "require_symbol": "需求符号",
@@ -153,7 +163,11 @@ class Config:
             "msg_sound_missing": "找不到音频文件:\n{path}",
             "msg_sound_play_fail": "播放音频时出错: {err}",
             "msg_sound_stop_fail": "停止音频时出错: {err}",
-            "dlg_merge_select_title": "选择要合并的 JSON 文件"
+            "dlg_merge_select_title": "选择要合并的 JSON 文件",
+            "msg_pkg_saved_auto": "已保存 CardDB.json:\n{path}",
+            "msg_pkg_saved_with_overwrites": "已保存 CardDB.json:\n{path}\n\n已覆盖 {count} 个重复ID。\n{detail}",
+            "msg_pkg_overwrite_more": "... 还有 {n} 条",
+            "msg_pkg_src_unknown": "(未知)"
         }
     }
 
@@ -161,7 +175,7 @@ class CardCreatorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Cultist Simulator Card Creator")
-        self.root.geometry("550x1060")
+        self.root.geometry("620x900")
 
         # 상태 변수 초기화
         self.current_lang = "ko"
@@ -187,6 +201,7 @@ class CardCreatorApp:
         
         # 초기 갱신
         self.update_preview()
+        self.loaded_db_path = None  # 불러온 DB/패키지 json 경로(저장 시 이 파일에 덮어쓰기)
 
     def _init_variables(self):
         """Tkinter 변수 초기화"""
@@ -222,19 +237,20 @@ class CardCreatorApp:
     def _create_main_layout(self):
         """메인 스크롤 가능한 영역 생성"""
         # 전체 캔버스 설정
-        canvas = tk.Canvas(self.root)
-        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
-        self.scrollable_frame = tk.Frame(canvas)
+        self.canvas = tk.Canvas(self.root)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=self.canvas.yview)
+        self.scrollable_frame = tk.Frame(self.canvas)
+
 
         self.scrollable_frame.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
 
-        canvas.pack(side="left", fill="both", expand=True)
+        self.canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
         # 내부 컨텐츠 생성
@@ -248,6 +264,7 @@ class CardCreatorApp:
         
         # 하단 버튼
         self._create_footer_buttons(self.scrollable_frame)
+        self._bind_mousewheel(self.canvas, self.scrollable_frame)
 
     def _create_header_section(self, parent):
         """기본 정보 입력 (ID, 이름, 설명, 효과 등)"""
@@ -289,17 +306,17 @@ class CardCreatorApp:
             self.rel_chk_btns[rel] = btn
 
         # 3. 설명 & 효과
-        self.widgets['lbl_desc'] = tk.Label(frame, text="설명")
-        self.widgets['lbl_desc'].grid(row=2, column=0, **grid_opts)
-        self.txt_desc = tk.Text(frame, height=3, width=40)
-        self.txt_desc.grid(row=2, column=1, columnspan=3, padx=5, pady=5)
-        self.txt_desc.bind("<KeyRelease>", self.update_preview)
-
-        self.widgets['lbl_effect'] = tk.Label(frame, text="효과 텍스트")
-        self.widgets['lbl_effect'].grid(row=3, column=0, **grid_opts)
+        self.widgets['lbl_effect'] = tk.Label(frame, text=self._t("effect"))
+        self.widgets['lbl_effect'].grid(row=2, column=0, **grid_opts)
         self.txt_effect = tk.Text(frame, height=3, width=40)
-        self.txt_effect.grid(row=3, column=1, columnspan=3, padx=5, pady=5)
+        self.txt_effect.grid(row=2, column=1, columnspan=3, padx=5, pady=5)
         self.txt_effect.bind("<KeyRelease>", self.update_preview)
+
+        self.widgets['lbl_desc'] = tk.Label(frame, text=self._t("description"))
+        self.widgets['lbl_desc'].grid(row=3, column=0, **grid_opts)
+        self.txt_desc = tk.Text(frame, height=3, width=40)
+        self.txt_desc.grid(row=3, column=1, columnspan=3, padx=5, pady=5)
+        self.txt_desc.bind("<KeyRelease>", self.update_preview)
 
     def _create_stats_section(self, parent):
         """스탯 관련 (심볼, 신도수, 갈림길)"""
@@ -351,8 +368,8 @@ class CardCreatorApp:
         self.widgets['btn_img_search'].grid(row=0, column=2)
         
         # Image Preview Area
-        self.lbl_preview_img = tk.Label(frame, text="No Image", bg="#eee", width=20, height=10)
-        self.lbl_preview_img.grid(row=1, column=1, pady=5)
+        self.lbl_preview_img = tk.Label(frame, text="No Image", bg="#eee")
+        self.lbl_preview_img.grid(row=1, column=1, pady=5, sticky="n")
 
         # Sound
         self.widgets['lbl_snd'] = tk.Label(frame, text="사운드")
@@ -393,7 +410,15 @@ class CardCreatorApp:
     # --- 로직 함수들 ---
 
     def get_current_data(self):
-        religion_list = [r for r, v in self.rel_vars.items() if v.get() and r != "None"]
+        # Religion 저장 규칙:
+        # - 다른 종교가 하나라도 있으면 그것만 저장
+        # - 아무 것도 없으면 ["None"] 저장
+        selected = [r for r, v in self.rel_vars.items() if v.get() and r != "None"]
+
+        if selected:
+            religion_list = selected
+        else:
+            religion_list = ["None"]
 
         data = {
             "id": self.var_id.get(),
@@ -463,12 +488,16 @@ class CardCreatorApp:
 
     def _load_preview_image(self, path):
         try:
+            box = (256, 256)  # 원하는 미리보기 최대 크기
             img = Image.open(path)
-            img.thumbnail((150, 150))
+            img = ImageOps.exif_transpose(img)  # 회전 정보 보정(스마트폰 사진 등)
+            img = ImageOps.contain(img, box)    # 비율 유지하며 box 안에 들어가게
             self.image_ref = ImageTk.PhotoImage(img)
             self.lbl_preview_img.config(image=self.image_ref, text="")
         except Exception:
+            self.image_ref = None
             self.lbl_preview_img.config(image=None, text="Load Error")
+
 
     def select_sound(self):
         path = filedialog.askopenfilename(filetypes=[("Audio", "*.mp3 *.wav *.ogg")])
@@ -519,141 +548,335 @@ class CardCreatorApp:
         self.image_ref = None
 
         self.update_preview()
+        self.loaded_db_path = None
 
     def load_json(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
-        if not file_path: return
-        
+        if not file_path:
+            return
+
+        def _pick_card(obj):
+            cards = self._extract_cards(obj)  # 단일/패키지/배열 모두 지원
+            if not cards:
+                return obj if isinstance(obj, dict) else {}
+
+            if len(cards) == 1:
+                return cards[0]
+
+            # 여러 장이면: (1) 파일명이 숫자면 그 id 우선, 아니면 (2) 현재 UI의 id 우선, 아니면 (3) 첫 번째
+            target_id = None
+            base = os.path.splitext(os.path.basename(file_path))[0]
+            if base.isdigit():
+                target_id = int(base)
+            else:
+                try:
+                    target_id = int(self.var_id.get())
+                except Exception:
+                    target_id = None
+
+            if target_id is not None:
+                for c in cards:
+                    try:
+                        if int(c.get("id")) == target_id:
+                            return c
+                    except Exception:
+                        pass
+            return cards[0]
+
+        def _resolve_path(p: str, cards_root: str) -> str:
+            p = (p or "").strip()
+            if not p:
+                return ""
+            if os.path.isabs(p) and os.path.exists(p):
+                return p
+
+            # 1) Cards 루트 기준(Images/.., Sounds/..)
+            cand1 = os.path.join(cards_root, p)
+            if os.path.exists(cand1):
+                return cand1
+
+            # 2) JSON 파일 위치 기준(예: 같은 폴더에 리소스가 있는 경우)
+            cand2 = os.path.join(os.path.dirname(file_path), p)
+            if os.path.exists(cand2):
+                return cand2
+
+            # 못 찾으면 원문 유지
+            return p
+
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            # 데이터 매핑
-            self.var_id.set(data.get("id", 0))
+                obj = json.load(f)
+                
+                # 불러온 파일이 패키지/배열 형태면 이후 저장 시 이 파일에 덮어쓰기하도록 경로 기억
+            cards = self._extract_cards(obj)
+            # 단일 카드 dict(또는 cards가 비어도 dict이면)도 "불러온 파일에 저장" 대상으로 기억
+            self.loaded_db_path = file_path if (cards or isinstance(obj, dict)) else None
+
+            data = _pick_card(obj)  # 기존 카드 선택 로직은 그대로
+
+            # Cards 기준 경로 준비
+            dirs = self._ensure_cards_dirs()
+            cards_root = dirs["root"]
+
+            # 기본 데이터 매핑
+            self.var_id.set(int(data.get("id", 0)))
             self.var_name.set(data.get("name", ""))
-            self.var_cultist.set(data.get("cultist", 0))
-            self.var_junction.set(data.get("junction", 0))
+            self.var_cultist.set(int(data.get("cultist", 0)))
+            self.var_junction.set(int(data.get("junction", 0)))
             self.var_is_root.set(bool(data.get("IsRoot", 0)))
-            
-            # Religion 리스트 -> 문자열
+
+            # Religion: 리스트/문자열 모두 지원 + 체크박스 동기화
             rel = data.get("Religion", [])
-                        
-                        # Religion 체크박스 동기화
-            if isinstance(rel, str):
-                rel_list = [x.strip() for x in rel.split(",") if x.strip()]
-            elif isinstance(rel, list):
+
+            if isinstance(rel, list):
                 rel_list = [str(x).strip() for x in rel if str(x).strip()]
+            elif isinstance(rel, str):
+                rel_list = [x.strip() for x in rel.split(",") if x.strip()]
             else:
                 rel_list = []
 
-            # 전부 초기화 후 적용
             for k in self.rel_vars:
                 self.rel_vars[k].set(False)
 
-            any_selected = False
-            for k in rel_list:
-                if k in self.rel_vars and k != "None":
-                    self.rel_vars[k].set(True)
-                    any_selected = True
+            if rel_list == ["None"] or not rel_list:
+                self.rel_vars["None"].set(True)
+            else:
+                for r in rel_list:
+                    if r in self.rel_vars:
+                        self.rel_vars[r].set(True)
+                self.rel_vars["None"].set(False)
 
-            # 아무 것도 없으면 None
-            self.rel_vars["None"].set(not any_selected)
-            
-            self.var_religion.set(", ".join(rel) if isinstance(rel, list) else str(rel))
-            
-            # Symbol 배열 매핑
-            sym_r = data.get("symbol_R", [0]*6)
-            sym_g = data.get("symbol_G", [0]*6)
+            # Symbol
+            sym_r = data.get("symbol_R", [0] * 6)
+            sym_g = data.get("symbol_G", [0] * 6)
             for i in range(6):
-                if i < len(sym_r): self.symbol_vars_r[i].set(sym_r[i])
-                if i < len(sym_g): self.symbol_vars_g[i].set(sym_g[i])
+                if i < len(sym_r):
+                    self.symbol_vars_r[i].set(int(sym_r[i]))
+                if i < len(sym_g):
+                    self.symbol_vars_g[i].set(int(sym_g[i]))
 
+            # 텍스트
             self.txt_desc.delete("1.0", tk.END)
             self.txt_desc.insert("1.0", data.get("description", ""))
+
             self.txt_effect.delete("1.0", tk.END)
             self.txt_effect.insert("1.0", data.get("effect", ""))
-            
+
+            # 이미지/사운드: 새 Cards 루트 기준으로 로드
+            # JSON에는 image_path/sound_path가 없으므로, id 기반으로 계산
+            dirs = self._ensure_cards_dirs()
+            card_id = int(data.get("id", 0))
+
+            # 이미지: id.* 중 존재하는 첫 파일 사용
+            img_path = ""
+            for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+                cand = os.path.join(dirs["images"], f"{card_id}{ext}")
+                if os.path.exists(cand):
+                    img_path = cand
+                    break
+
+            # 사운드: id.* 중 존재하는 첫 파일 사용
+            snd_path = ""
+            for ext in (".wav", ".mp3", ".ogg"):
+                cand = os.path.join(dirs["sounds"], f"{card_id}{ext}")
+                if os.path.exists(cand):
+                    snd_path = cand
+                    break
+
+            self.var_image_path.set(img_path)
+            if img_path and os.path.exists(img_path):
+                self._load_preview_image(img_path)
+            else:
+                self.image_ref = None
+                self.lbl_preview_img.config(image=None, text="No Image")
+
+            self.var_sound_path.set(snd_path)
+
             self.update_preview()
             messagebox.showinfo(self._t("msg_title_load_ok"), self._t("msg_load_ok"))
-            
+
         except Exception as e:
             messagebox.showerror(self._t("msg_title_error"), self._t("msg_load_fail", err=e))
 
     def save_json_file(self):
-        data = self.get_current_data()
-        
-        raw_id = str(self.var_id.get()).strip()
-
         try:
-            card_id = int(raw_id)
-        except ValueError:
-            messagebox.showerror(self._t("msg_title_error"), self._t("msg_id_not_int"))
-            return
+            data = self.get_current_data()
+            
+            raw_id = str(self.var_id.get()).strip()
 
-        if card_id < 0:
-            messagebox.showerror(self._t("msg_title_error"), self._t("msg_id_negative"))
-            return
+            try:
+                card_id = int(raw_id)
+            except ValueError:
+                messagebox.showerror(self._t("msg_title_error"), self._t("msg_id_not_int"))
+                return
 
-        dirs = self._ensure_cards_dirs()
-        
-        # 1) 이미지/사운드: Cards/Images, Cards/Sounds로 복사 (파일명은 id)
-        img_src = self.var_image_path.get().strip()
-        if img_src and os.path.exists(img_src):
-            img_ext = os.path.splitext(img_src)[1] or ".png"
-            img_dst = os.path.join(dirs["images"], f"{card_id}{img_ext}")
-            shutil.copy2(img_src, img_dst)
-            # JSON에 기록(선택): 상대경로로 저장
-            data["image_path"] = os.path.relpath(img_dst, dirs["root"]).replace("\\", "/")
-            self.var_image_path.set(img_dst)
+            if card_id < 0:
+                messagebox.showerror(self._t("msg_title_error"), self._t("msg_id_negative"))
+                return
 
-        snd_src = self.var_sound_path.get().strip()
-        if snd_src and os.path.exists(snd_src):
-            snd_ext = os.path.splitext(snd_src)[1] or ".mp3"
-            snd_dst = os.path.join(dirs["sounds"], f"{card_id}{snd_ext}")
-            shutil.copy2(snd_src, snd_dst)
-            data["sound_path"] = os.path.relpath(snd_dst, dirs["root"]).replace("\\", "/")
-            self.var_sound_path.set(snd_dst)
+            dirs = self._ensure_cards_dirs()
+            
+            # 저장 대상:
+            # - DB/패키지 파일을 불러온 상태면 그 파일에 덮어쓰기 저장
+            # - 아니면 기본: Desktop/Cards/DB/CardDB.json
+            db_dir = os.path.join(dirs["root"], "DB")
+            os.makedirs(db_dir, exist_ok=True)
+            default_db_path = os.path.join(db_dir, "CardDB.json")
 
-        # 2) JSON: Cards/JSON/{id}.json 로 저장
-        json_path = os.path.join(dirs["json"], f"{card_id}.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+            target_path = self.loaded_db_path if self.loaded_db_path else default_db_path
+                
+            img_src = self.var_image_path.get().strip()
+            if img_src and os.path.exists(img_src):
+                img_ext = os.path.splitext(img_src)[1] or ".png"
+                img_dst = os.path.join(dirs["images"], f"{card_id}{img_ext}")
 
-        messagebox.showinfo(self._t("msg_title_saved"), self._t("msg_save_ok", path=json_path))
+                if os.path.abspath(img_src) != os.path.abspath(img_dst):
+                    shutil.copy2(img_src, img_dst)
+
+                self.var_image_path.set(img_dst)
+
+            snd_src = self.var_sound_path.get().strip()
+            if snd_src and os.path.exists(snd_src):
+                snd_ext = os.path.splitext(snd_src)[1] or ".mp3"
+                snd_dst = os.path.join(dirs["sounds"], f"{card_id}{snd_ext}")
+
+                if os.path.abspath(snd_src) != os.path.abspath(snd_dst):
+                    shutil.copy2(snd_src, snd_dst)
+
+                self.var_sound_path.set(snd_dst)
+
+
+            # 기존 카드 로드(없으면 빈 리스트)
+            existing_cards = []
+            if os.path.exists(target_path):
+                try:
+                    with open(target_path, "r", encoding="utf-8") as f:
+                        existing_obj = json.load(f)
+                    existing_cards = self._extract_cards(existing_obj)
+                except Exception:
+                    existing_cards = []
+
+            # 현재 카드 1장(data)을 id 기준으로 덮어쓰기 병합 + id 정렬
+            merged_cards = self._merge_cards_by_id(existing_cards, [data])
+            out = {"cards": merged_cards}
+
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(out, f, ensure_ascii=False, indent=4)
+
+            messagebox.showinfo(self._t("msg_title_saved"), self._t("msg_save_ok", path=target_path))
+        except Exception as e:
+            messagebox.showerror(self._t("msg_title_error"), self._t("msg_pkg_fail", err=e))
 
     def save_package(self):
-        """여러 JSON을 선택하여 하나의 JSON으로 합쳐 저장"""
+        """여러 JSON(단일 카드 / cards 패키지 / 카드 배열)을 하나의 패키지로 병합하여 자동 저장
+        - 저장 위치: Desktop/Cards/DB/CardDB.json
+        - 결과는 {"cards": [...]} 고정
+        - id 기준 정렬
+        - 동일 id가 있으면 덮어쓰기(마지막에 읽힌 파일 우선)
+        - 중복 id 덮어쓰기 발생 시, 어떤 파일이 기준(최종 반영)인지 메시지로 알림
+        """
         json_paths = filedialog.askopenfilenames(
             title=self._t("dlg_merge_select_title"),
             filetypes=[("JSON", "*.json")]
         )
-
         if not json_paths:
             return
 
-        save_path = filedialog.asksaveasfilename(
-            defaultextension=".json",
-            filetypes=[("JSON", "*.json")]
-        )
-        if not save_path:
-            return
+        # 자동 저장 경로: Desktop/Cards/DB/CardDB.json
+        desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+        db_dir = os.path.join(desktop_dir, "Cards", "DB")
+        os.makedirs(db_dir, exist_ok=True)
+        save_path = os.path.join(db_dir, "CardDB.json")
+
+        def _extract_cards(obj):
+            """obj가 (1) 단일 카드 dict (2) {'cards': [...]} (3) [...] 인 경우를 모두 카드 리스트로 변환"""
+            if isinstance(obj, list):
+                return obj
+            if isinstance(obj, dict):
+                if "cards" in obj and isinstance(obj["cards"], list):
+                    return obj["cards"]
+                if "cards: " in obj and isinstance(obj["cards: "], list):  # 과거 오타 키 방어
+                    return obj["cards: "]
+                if "id" in obj:
+                    return [obj]
+            return []
+
+        def _safe_int_id(card):
+            try:
+                return int(card.get("id"))
+            except Exception:
+                return None
 
         try:
-            merged = []
+            by_id = {}
+            src_by_id = {}      # 현재 by_id[id]가 어디에서 왔는지 기록
+            overwrites = []     # (id, prev_src, new_src)
+
+            # 1) 기존 CardDB.json이 있으면 먼저 로드
+            if os.path.exists(save_path):
+                try:
+                    with open(save_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    for c in _extract_cards(existing):
+                        cid = _safe_int_id(c)
+                        if cid is None or cid < 0:
+                            continue
+                        c["id"] = cid
+                        by_id[cid] = c
+                        src_by_id[cid] = os.path.basename(save_path)  # "CardDB.json"
+                except Exception:
+                    pass
+
+            # 2) 선택한 파일들을 순서대로 병합 (같은 id면 덮어쓰기 + 출처 기록)
             for p in json_paths:
                 with open(p, "r", encoding="utf-8") as f:
-                    merged.append(json.load(f))
+                    obj = json.load(f)
 
-            # 원하는 포맷으로 저장 (리스트 그대로 또는 dict로 래핑)
-            out = {"cards": merged}
+                incoming_src = os.path.basename(p)
+                for c in _extract_cards(obj):
+                    cid = _safe_int_id(c)
+                    if cid is None or cid < 0:
+                        continue
 
+                    c["id"] = cid
+                    if cid in by_id:
+                        prev_src = src_by_id.get(cid, self._t("msg_pkg_src_unknown"))
+                        overwrites.append((cid, prev_src, incoming_src))
+
+                    by_id[cid] = c
+                    src_by_id[cid] = incoming_src
+
+            # 3) id 기준 정렬 후 저장
+            cards_sorted = [by_id[k] for k in sorted(by_id.keys())]
+            out = {"cards": cards_sorted}
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(out, f, ensure_ascii=False, indent=4)
 
-            messagebox.showinfo(self._t("msg_title_done"), self._t("msg_pkg_saved"))
+            # 4) 중복 id 덮어쓰기 리포트 메시지
+            if overwrites:
+                # 너무 길어지면 UI가 불편하므로 상한
+                max_lines = 25
+                lines = []
+                for i, (cid, prev_src, new_src) in enumerate(overwrites[:max_lines]):
+                    lines.append(f"- ID {cid}: {prev_src} -> {new_src}")
+                if len(overwrites) > max_lines:
+                    lines.append(self._t("msg_pkg_overwrite_more", n=len(overwrites) - max_lines))
+
+                msg = self._t(
+                    "msg_pkg_saved_with_overwrites",
+                    path=save_path,
+                    count=len(overwrites),
+                    detail="\n".join(lines),
+                )
+            else:
+                msg = self._t("msg_pkg_saved_auto", path=save_path)
+
+            messagebox.showinfo(self._t("msg_title_done"), msg)
+
         except Exception as e:
             messagebox.showerror(self._t("msg_title_error"), self._t("msg_pkg_fail", err=e))
-            
+
+
     def _on_religion_change(self, changed_rel: str):
     # None은 단독 선택(다른 것과 공존 불가) 규칙 예시
         if changed_rel == "None" and self.rel_vars["None"].get():
@@ -699,6 +922,72 @@ class CardCreatorApp:
             pygame.mixer.music.stop()
         except Exception as e:
             messagebox.showerror(self._t("msg_title_error"), self._t("msg_sound_stop_fail", err=e))
+
+    def _extract_cards(self, obj):
+        """obj를 카드 리스트로 표준화:
+        - 단일 카드 dict -> [dict]
+        - {'cards': [...]} -> [...]
+        - [...] -> [...]
+        """
+        if isinstance(obj, list):
+            return obj
+
+        if isinstance(obj, dict):
+            if "cards" in obj and isinstance(obj["cards"], list):
+                return obj["cards"]
+            # 과거 잘못 저장된 키 방어 (원하면 제거 가능)
+            if "cards: " in obj and isinstance(obj["cards: "], list):
+                return obj["cards: "]
+            if "id" in obj:
+                return [obj]
+
+        return []
+
+    def _merge_cards_by_id(self, base_cards, incoming_cards):
+        """id 기준 병합: 동일 id면 incoming이 덮어쓰기, 결과는 id 정렬된 리스트"""
+        by_id = {}
+
+        def put(card):
+            try:
+                cid = int(card.get("id"))
+            except Exception:
+                return
+            if cid < 0:
+                return
+            card["id"] = cid
+            by_id[cid] = card
+
+        for c in base_cards:
+            put(c)
+        for c in incoming_cards:
+            put(c)
+
+        return [by_id[k] for k in sorted(by_id.keys())]
+    
+    def _bind_mousewheel(self, canvas: tk.Canvas, target_widget: tk.Widget):
+        def _on_enter(_):
+            self.root.bind_all("<MouseWheel>", lambda e: self._on_mousewheel(e, canvas))   # Windows/macOS
+            self.root.bind_all("<Button-4>", lambda e: self._on_mousewheel(e, canvas))    # Linux up
+            self.root.bind_all("<Button-5>", lambda e: self._on_mousewheel(e, canvas))    # Linux down
+
+        def _on_leave(_):
+            self.root.unbind_all("<MouseWheel>")
+            self.root.unbind_all("<Button-4>")
+            self.root.unbind_all("<Button-5>")
+
+        target_widget.bind("<Enter>", _on_enter)
+        target_widget.bind("<Leave>", _on_leave)
+
+    def _on_mousewheel(self, event, canvas: tk.Canvas):
+        # Windows/macOS: event.delta 사용, Linux: Button-4/5 사용
+        if hasattr(event, "delta") and event.delta:
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        else:
+            if event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
