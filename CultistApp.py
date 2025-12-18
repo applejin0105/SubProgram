@@ -37,8 +37,8 @@ class Config:
             "msg_sound_play_fail": "사운드 재생 중 오류: {err}",
             "msg_sound_stop_fail": "사운드 중지 중 오류: {err}",
             "dlg_merge_select_title": "합칠 JSON 파일을 선택하세요",
-            "msg_pkg_saved_auto": "CardDB.json 저장 완료:\n{path}",
-            "msg_pkg_saved_with_overwrites": "CardDB.json 저장 완료:\n{path}\n\n중복 ID {count}건이 덮어쓰기 되었습니다.\n{detail}",
+            "msg_pkg_saved_auto": "cardDB.json 저장 완료:\n{path}",
+            "msg_pkg_saved_with_overwrites": "cardDB.json 저장 완료:\n{path}\n\n중복 ID {count}건이 덮어쓰기 되었습니다.\n{detail}",
             "msg_pkg_overwrite_more": "... 외 {n}건 더 있습니다.",
             "msg_pkg_src_unknown": "(알 수 없음)"
         },
@@ -68,8 +68,8 @@ class Config:
             "msg_sound_play_fail": "Error while playing sound: {err}",
             "msg_sound_stop_fail": "Error while stopping sound: {err}",
             "dlg_merge_select_title": "Select JSON files to merge",
-            "msg_pkg_saved_auto": "Saved CardDB.json:\n{path}",
-            "msg_pkg_saved_with_overwrites": "Saved CardDB.json:\n{path}\n\nOverwrote {count} duplicate ID(s).\n{detail}",
+            "msg_pkg_saved_auto": "Saved cardDB.json:\n{path}",
+            "msg_pkg_saved_with_overwrites": "Saved cardDB.json:\n{path}\n\nOverwrote {count} duplicate ID(s).\n{detail}",
             "msg_pkg_overwrite_more": "... and {n} more.",
             "msg_pkg_src_unknown": "(unknown)"
         },
@@ -116,8 +116,8 @@ class Config:
             "msg_sound_play_fail": "サウンド再生中にエラー: {err}",
             "msg_sound_stop_fail": "サウンド停止中にエラー: {err}",
             "dlg_merge_select_title": "結合するJSONファイルを選択してください",
-            "msg_pkg_saved_auto": "CardDB.json を保存しました:\n{path}",
-            "msg_pkg_saved_with_overwrites": "CardDB.json を保存しました:\n{path}\n\n重複ID {count}件を上書きしました。\n{detail}",
+            "msg_pkg_saved_auto": "cardDB.json を保存しました:\n{path}",
+            "msg_pkg_saved_with_overwrites": "cardDB.json を保存しました:\n{path}\n\n重複ID {count}件を上書きしました。\n{detail}",
             "msg_pkg_overwrite_more": "... 他 {n}件",
             "msg_pkg_src_unknown": "(不明)"
         },
@@ -164,8 +164,8 @@ class Config:
             "msg_sound_play_fail": "播放音频时出错: {err}",
             "msg_sound_stop_fail": "停止音频时出错: {err}",
             "dlg_merge_select_title": "选择要合并的 JSON 文件",
-            "msg_pkg_saved_auto": "已保存 CardDB.json:\n{path}",
-            "msg_pkg_saved_with_overwrites": "已保存 CardDB.json:\n{path}\n\n已覆盖 {count} 个重复ID。\n{detail}",
+            "msg_pkg_saved_auto": "已保存 cardDB.json:\n{path}",
+            "msg_pkg_saved_with_overwrites": "已保存 cardDB.json:\n{path}\n\n已覆盖 {count} 个重复ID。\n{detail}",
             "msg_pkg_overwrite_more": "... 还有 {n} 条",
             "msg_pkg_src_unknown": "(未知)"
         }
@@ -569,7 +569,7 @@ class CardCreatorApp:
             cards = self._extract_cards(obj)
 
             # 저장 모드 결정
-            # - CardDB.json을 열면 DB 모드
+            # - cardDB.json을 열면 DB 모드
             # - 그 외는 single 모드(0.json 등 단일 카드 파일 포함)
             if fname == "carddb.json":
                 self.save_mode = "db"
@@ -711,11 +711,11 @@ class CardCreatorApp:
 
             db_dir = os.path.join(dirs["root"], "DB")
             os.makedirs(db_dir, exist_ok=True)
-            default_db_path = os.path.join(db_dir, "CardDB.json")
+            default_db_path = os.path.join(db_dir, "cardDB.json")
 
             # 저장 모드에 따라 target_path 결정
             if getattr(self, "save_mode", "single") == "db":
-                # DB 모드: 불러온 DB가 있으면 그 파일, 없으면 기본 CardDB.json
+                # DB 모드: 불러온 DB가 있으면 그 파일, 없으면 기본 cardDB.json
                 target_path = self.loaded_db_path if self.loaded_db_path else default_db_path
             else:
                 # 단일 모드: 불러온 단일 json이 있으면 그 파일에 저장,
@@ -823,7 +823,7 @@ class CardCreatorApp:
 
     def save_package(self):
         """여러 JSON(단일 카드 / cards 패키지 / 카드 배열)을 하나의 패키지로 병합하여 자동 저장
-        - 저장 위치: Desktop/Cards/DB/CardDB.json
+        - 저장 위치: Desktop/Cards/DB/cardDB.json
         - 결과는 {"cards": [...]} 고정
         - id 기준 정렬
         - 동일 id가 있으면 덮어쓰기(마지막에 읽힌 파일 우선)
@@ -836,11 +836,11 @@ class CardCreatorApp:
         if not json_paths:
             return
 
-        # 자동 저장 경로: Desktop/Cards/DB/CardDB.json
+        # 자동 저장 경로: Desktop/Cards/DB/cardDB.json
         desktop_dir = os.path.join(os.path.expanduser("~"), "Desktop")
         db_dir = os.path.join(desktop_dir, "Cards", "DB")
         os.makedirs(db_dir, exist_ok=True)
-        save_path = os.path.join(db_dir, "CardDB.json")
+        save_path = os.path.join(db_dir, "cardDB.json")
 
         def _extract_cards(obj):
             """obj가 (1) 단일 카드 dict (2) {'cards': [...]} (3) [...] 인 경우를 모두 카드 리스트로 변환"""
@@ -866,7 +866,7 @@ class CardCreatorApp:
             src_by_id = {}      # 현재 by_id[id]가 어디에서 왔는지 기록
             overwrites = []     # (id, prev_src, new_src)
 
-            # 1) 기존 CardDB.json이 있으면 먼저 로드
+            # 1) 기존 cardDB.json이 있으면 먼저 로드
             if os.path.exists(save_path):
                 try:
                     with open(save_path, "r", encoding="utf-8") as f:
@@ -877,7 +877,7 @@ class CardCreatorApp:
                             continue
                         c["id"] = cid
                         by_id[cid] = c
-                        src_by_id[cid] = os.path.basename(save_path)  # "CardDB.json"
+                        src_by_id[cid] = os.path.basename(save_path)  # "cardDB.json"
                 except Exception:
                     pass
 
