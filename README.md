@@ -1,6 +1,6 @@
 ### CultistApp.py
 Cultist 카드 생성기
-![image]([https://github.com/user-attachments/assets/1d0d515c-99ff-45f9-bbcf-c49dd802e8fc](https://github.com/user-attachments/assets/48295963-ebd7-4014-a960-e6443ce007cf))
+<img width="532" height="1092" alt="Image" src="https://github.com/user-attachments/assets/48295963-ebd7-4014-a960-e6443ce007cf" />
 
 ##Update Log
 #[2025-01-13]
