@@ -97,7 +97,7 @@ class CardCreatorApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Cultist Simulator Card Creator")
-        self.root.geometry("900x1200")
+        self.root.geometry("530x1060")
 
         # 상태 변수 초기화
         self.current_lang = "ko"
