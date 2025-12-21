@@ -213,7 +213,6 @@ class CardCreatorApp:
         self.var_cultist = tk.IntVar(value=0)
         self.var_junction = tk.IntVar(value=0)
         self.var_is_root = tk.BooleanVar(value=False)
-        self.var_religion = tk.StringVar() # "Gre, Pho" 형태의 문자열
         self.var_image_path = tk.StringVar()
         self.var_sound_path = tk.StringVar()
         
@@ -221,10 +220,6 @@ class CardCreatorApp:
         self.symbol_vars_r = [tk.IntVar(value=0) for _ in range(6)]
         self.symbol_vars_g = [tk.IntVar(value=0) for _ in range(6)]
         
-        # Religion 체크박스 변수 (UI 생성 전에 준비)
-        self.rel_vars = {rel: tk.BooleanVar(value=False) for rel in ["None", "Isl", "Cri", "Gre", "Pho"]}
-        self.rel_vars["None"].set(True)
-
     def _create_menu(self):
         """상단 언어 선택 메뉴"""
         top_frame = tk.Frame(self.root, bg="#ddd", pady=5)
@@ -291,21 +286,6 @@ class CardCreatorApp:
         # 2. IsRoot & Religion
         self.widgets['chk_root'] = tk.Checkbutton(frame, text="IsRoot (루트 카드)", variable=self.var_is_root, command=self.update_preview)
         self.widgets['chk_root'].grid(row=1, column=0, columnspan=2, **grid_opts)
-
-		# Religion 레이블 및 체크박스 프레임 생성
-        self.widgets['lbl_religion'] = tk.Label(frame, text="Religion")
-        self.widgets['lbl_religion'].grid(row=1, column=2, **grid_opts)
-
-        rel_frame = tk.Frame(frame)
-        rel_frame.grid(row=1, column=3, sticky="w", padx=5)
-
-        self.rel_chk_btns = {}
-        for rel in ["None", "Isl", "Cri", "Gre", "Pho"]:
-            btn = tk.Checkbutton(rel_frame, text=rel, 
-								 variable=self.rel_vars[rel], 
-								 command=lambda r=rel: self._on_religion_change(r))
-            btn.pack(side="left", padx=2)
-            self.rel_chk_btns[rel] = btn
 
         # 3. 설명 & 효과
         self.widgets['lbl_effect'] = tk.Label(frame, text=self._t("effect"))
@@ -412,15 +392,6 @@ class CardCreatorApp:
     # --- 로직 함수들 ---
 
     def get_current_data(self):
-        # Religion 저장 규칙:
-        # - 다른 종교가 하나라도 있으면 그것만 저장
-        # - 아무 것도 없으면 ["None"] 저장
-        selected = [r for r, v in self.rel_vars.items() if v.get() and r != "None"]
-
-        if selected:
-            religion_list = selected
-        else:
-            religion_list = ["None"]
 
         data = {
             "id": self.var_id.get(),
@@ -431,8 +402,7 @@ class CardCreatorApp:
             "junction": self.var_junction.get(),
             "effect": self.txt_effect.get("1.0", tk.END).strip(),
             "description": self.txt_desc.get("1.0", tk.END).strip(),
-            "IsRoot": 1 if self.var_is_root.get() else 0,
-            "Religion": religion_list
+            "IsRoot": 1 if self.var_is_root.get() else 0
         }
         return data
 
@@ -461,7 +431,6 @@ class CardCreatorApp:
         self.widgets['lbl_id'].config(text=L['id'])
         self.widgets['lbl_name'].config(text=L['name'])
         self.widgets['chk_root'].config(text=L['is_root'])
-        self.widgets['lbl_religion'].config(text=L['religion'])
         self.widgets['lbl_desc'].config(text=L['description'])
         self.widgets['lbl_effect'].config(text=L['effect'])
         
@@ -531,7 +500,6 @@ class CardCreatorApp:
         self.var_cultist.set(0)
         self.var_junction.set(0)
         self.var_is_root.set(False)
-        self.var_religion.set("")
         self.var_image_path.set("")
         self.var_sound_path.set("")
         
@@ -540,11 +508,6 @@ class CardCreatorApp:
         for v in self.symbol_vars_g:
             v.set(0)
 
-        # Religion 체크박스 초기화
-        for k in self.rel_vars:
-            self.rel_vars[k].set(False)
-        self.rel_vars["None"].set(True)
-        
         # 텍스트/이미지 UI 초기화
         self.txt_desc.delete("1.0", tk.END)
         self.txt_effect.delete("1.0", tk.END)
@@ -619,26 +582,6 @@ class CardCreatorApp:
             self.var_cultist.set(int(data.get("cultist", 0)))
             self.var_junction.set(int(data.get("junction", 0)))
             self.var_is_root.set(bool(data.get("IsRoot", 0)))
-
-            # Religion 체크박스 동기화 (None 규칙 포함)
-            rel = data.get("Religion", [])
-            if isinstance(rel, list):
-                rel_list = [str(x).strip() for x in rel if str(x).strip()]
-            elif isinstance(rel, str):
-                rel_list = [x.strip() for x in rel.split(",") if x.strip()]
-            else:
-                rel_list = []
-
-            for k in self.rel_vars:
-                self.rel_vars[k].set(False)
-
-            if rel_list == ["None"] or not rel_list:
-                self.rel_vars["None"].set(True)
-            else:
-                for r in rel_list:
-                    if r in self.rel_vars:
-                        self.rel_vars[r].set(True)
-                self.rel_vars["None"].set(False)
 
             # Symbol
             sym_r = data.get("symbol_R", [0] * 6)
@@ -941,24 +884,6 @@ class CardCreatorApp:
 
         except Exception as e:
             messagebox.showerror(self._t("msg_title_error"), self._t("msg_pkg_fail", err=e))
-
-
-    def _on_religion_change(self, changed_rel: str):
-    # None은 단독 선택(다른 것과 공존 불가) 규칙 예시
-        if changed_rel == "None" and self.rel_vars["None"].get():
-            for rel in self.rel_vars:
-                if rel != "None":
-                    self.rel_vars[rel].set(False)
-        else:
-            # 다른 종교가 하나라도 체크되면 None 해제
-            if changed_rel != "None" and self.rel_vars[changed_rel].get():
-                self.rel_vars["None"].set(False)
-
-            # 모두 해제된 상태가 되면 None을 다시 켬(선택 정책)
-            if not any(self.rel_vars[r].get() for r in self.rel_vars if r != "None"):
-                self.rel_vars["None"].set(True)
-                
-        self.update_preview()
         
     def _cards_root_dir(self) -> str:
         desktop = os.path.join(os.path.expanduser("~"), "Desktop")
