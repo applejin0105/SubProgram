@@ -396,8 +396,8 @@ class CardCreatorApp:
         data = {
             "id": self.var_id.get(),
             "name": self.var_name.get(),
-            "symbol_R": [v.get() for v in self.symbol_vars_r],
-            "symbol_G": [v.get() for v in self.symbol_vars_g],
+            "symbolR": [v.get() for v in self.symbol_vars_r],
+            "symbolG": [v.get() for v in self.symbol_vars_g],
             "cultist": self.var_cultist.get(),
             "junction": self.var_junction.get(),
             "effect": self.txt_effect.get("1.0", tk.END).strip(),
@@ -584,8 +584,8 @@ class CardCreatorApp:
             self.var_is_root.set(bool(data.get("IsRoot", 0)))
 
             # Symbol
-            sym_r = data.get("symbol_R", [0] * 6)
-            sym_g = data.get("symbol_G", [0] * 6)
+            sym_r = data.get("symbolR", [0] * 6)
+            sym_g = data.get("symbolG", [0] * 6)
             for i in range(6):
                 self.symbol_vars_r[i].set(int(sym_r[i]) if i < len(sym_r) else 0)
                 self.symbol_vars_g[i].set(int(sym_g[i]) if i < len(sym_g) else 0)
