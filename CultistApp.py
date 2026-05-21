@@ -19,8 +19,16 @@ class Config:
             "search": "찾기", "preview": "미리보기", "play": "재생", "stop": "정지",
             "save": "저장 (.cardpkg)", "json_save": "JSON 저장", "load": "불러오기", 
             "reset": "초기화", "detail_effect": "세부 효과(로직용)",
-            "is_root": "루트 카드 여부 (IsRoot)", "religion": "종교 태그 (쉼표로 구분)",
+            "is_root": "루트 카드 (IsRoot)", "religion": "종교 태그 (쉼표로 구분)",
+            "is_unique_reveal": "유일 공개 (IsUniqueReveal)",
+            "is_repeatable": "효과 반복 가능 (IsRepeatable)",
+            "is_reveal_immediately": "즉시 공개 (IsRevealImmediately)",
+            "is_echo": "에코 (IsEcho)",
+            "is_force_select": "강제 선택 (IsForceSelect)",
+            "is_crisis": "위기 카드 (IsCrisis)",
+            "is_collectible": "수집 가능 (IsCollectible)",
             "header_info": "기본 정보", "header_stats": "스탯 설정", "header_media": "미디어",
+            "header_flags": "카드 플래그",
             "msg_title_error": "오류",
             "msg_title_saved": "저장",
             "msg_title_done": "완료",
@@ -50,8 +58,16 @@ class Config:
             "search": "Browse", "preview": "Preview", "play": "Play", "stop": "Stop",
             "save": "Save Package", "json_save": "Save JSON", "load": "Load JSON", 
             "reset": "Reset", "detail_effect": "Detail Effects",
-            "is_root": "Is Root Card", "religion": "Religion Tags (comma separated)",
+            "is_root": "Root Card (IsRoot)", "religion": "Religion Tags (comma separated)",
+            "is_unique_reveal": "Unique Reveal (IsUniqueReveal)",
+            "is_repeatable": "Repeatable (IsRepeatable)",
+            "is_reveal_immediately": "Reveal Immediately (IsRevealImmediately)",
+            "is_echo": "Echo (IsEcho)",
+            "is_force_select": "Force Select (IsForceSelect)",
+            "is_crisis": "Crisis Card (IsCrisis)",
+            "is_collectible": "Collectible (IsCollectible)",
             "header_info": "Basic Info", "header_stats": "Stats", "header_media": "Media",
+            "header_flags": "Card Flags",
             "msg_title_error": "Error",
             "msg_title_saved": "Saved",
             "msg_title_done": "Done",
@@ -97,9 +113,17 @@ class Config:
             "detail_effect": "詳細効果",
             "is_root": "ルートカード (IsRoot)",
             "religion": "宗教タグ (カンマ区切り)",
+            "is_unique_reveal": "ユニーク公開 (IsUniqueReveal)",
+            "is_repeatable": "効果反復可 (IsRepeatable)",
+            "is_reveal_immediately": "即時公開 (IsRevealImmediately)",
+            "is_echo": "エコー (IsEcho)",
+            "is_force_select": "強制選択 (IsForceSelect)",
+            "is_crisis": "危機カード (IsCrisis)",
+            "is_collectible": "収集可能 (IsCollectible)",
             "header_info": "基本情報",
             "header_stats": "ステータス設定",
             "header_media": "メディア",
+            "header_flags": "カードフラグ",
             "msg_title_error": "エラー",
             "msg_title_saved": "保存",
             "msg_title_done": "完了",
@@ -145,9 +169,17 @@ class Config:
             "detail_effect": "详细效果",
             "is_root": "根卡 (IsRoot)",
             "religion": "宗教标签（逗号分隔）",
+            "is_unique_reveal": "唯一公开 (IsUniqueReveal)",
+            "is_repeatable": "效果可重复 (IsRepeatable)",
+            "is_reveal_immediately": "立即公开 (IsRevealImmediately)",
+            "is_echo": "回声 (IsEcho)",
+            "is_force_select": "强制选择 (IsForceSelect)",
+            "is_crisis": "危机卡 (IsCrisis)",
+            "is_collectible": "可收集 (IsCollectible)",
             "header_info": "基本信息",
             "header_stats": "属性设置",
             "header_media": "媒体",
+            "header_flags": "卡片标志",
             "msg_title_error": "错误",
             "msg_title_saved": "已保存",
             "msg_title_done": "完成",
@@ -212,10 +244,23 @@ class CardCreatorApp:
         self.var_species = tk.StringVar(value="일반")
         self.var_cultist = tk.IntVar(value=0)
         self.var_junction = tk.IntVar(value=0)
-        self.var_is_root = tk.BooleanVar(value=False)
         self.var_image_path = tk.StringVar()
         self.var_sound_path = tk.StringVar()
-        
+
+        # 카드 플래그 - 모두 bool 저장
+        self.flag_vars = {
+            "IsRoot":              tk.BooleanVar(value=False),
+            "IsUniqueReveal":      tk.BooleanVar(value=False),
+            "IsRepeatable":        tk.BooleanVar(value=False),
+            "IsRevealImmediately": tk.BooleanVar(value=False),
+            "IsEcho":              tk.BooleanVar(value=False),
+            "IsForceSelect":       tk.BooleanVar(value=False),
+            "IsCrisis":            tk.BooleanVar(value=False),
+            "IsCollectible":       tk.BooleanVar(value=False),
+        }
+        # 하위 호환 alias (기존 코드가 self.var_is_root 참조 가능)
+        self.var_is_root = self.flag_vars["IsRoot"]
+
         # 심볼 변수 (순서대로 6개)
         self.symbol_vars_r = [tk.IntVar(value=0) for _ in range(6)]
         self.symbol_vars_g = [tk.IntVar(value=0) for _ in range(6)]
@@ -255,6 +300,8 @@ class CardCreatorApp:
         ttk.Separator(self.scrollable_frame, orient='horizontal').pack(fill='x', pady=10)
         self._create_stats_section(self.scrollable_frame)
         ttk.Separator(self.scrollable_frame, orient='horizontal').pack(fill='x', pady=10)
+        self._create_flags_section(self.scrollable_frame)
+        ttk.Separator(self.scrollable_frame, orient='horizontal').pack(fill='x', pady=10)
         self._create_media_section(self.scrollable_frame)
         ttk.Separator(self.scrollable_frame, orient='horizontal').pack(fill='x', pady=10)
         self._create_json_preview(self.scrollable_frame)
@@ -283,22 +330,52 @@ class CardCreatorApp:
         entry_name.grid(row=0, column=3, sticky="ew", padx=5)
         entry_name.bind("<KeyRelease>", self.update_preview)
 
-        # 2. IsRoot & Religion
-        self.widgets['chk_root'] = tk.Checkbutton(frame, text="IsRoot (루트 카드)", variable=self.var_is_root, command=self.update_preview)
-        self.widgets['chk_root'].grid(row=1, column=0, columnspan=2, **grid_opts)
-
-        # 3. 설명 & 효과
+        # 2. 설명 & 효과 (IsRoot 등 플래그는 별도 Flags 섹션으로 이동)
         self.widgets['lbl_effect'] = tk.Label(frame, text=self._t("effect"))
-        self.widgets['lbl_effect'].grid(row=2, column=0, **grid_opts)
+        self.widgets['lbl_effect'].grid(row=1, column=0, **grid_opts)
         self.txt_effect = tk.Text(frame, height=3, width=40)
-        self.txt_effect.grid(row=2, column=1, columnspan=3, padx=5, pady=5)
+        self.txt_effect.grid(row=1, column=1, columnspan=3, padx=5, pady=5)
         self.txt_effect.bind("<KeyRelease>", self.update_preview)
 
         self.widgets['lbl_desc'] = tk.Label(frame, text=self._t("description"))
-        self.widgets['lbl_desc'].grid(row=3, column=0, **grid_opts)
+        self.widgets['lbl_desc'].grid(row=2, column=0, **grid_opts)
         self.txt_desc = tk.Text(frame, height=3, width=40)
-        self.txt_desc.grid(row=3, column=1, columnspan=3, padx=5, pady=5)
+        self.txt_desc.grid(row=2, column=1, columnspan=3, padx=5, pady=5)
         self.txt_desc.bind("<KeyRelease>", self.update_preview)
+
+    def _create_flags_section(self, parent):
+        """카드 플래그 (체크박스 8개, 2열 그리드)"""
+        frame = tk.LabelFrame(parent, text="카드 플래그", padx=10, pady=10)
+        frame.pack(fill="x", padx=10, pady=5)
+        self.widgets['group_flags'] = frame
+
+        # (i18n_key, flag_key) 쌍을 순서대로 배치
+        items = [
+            ("is_root",               "IsRoot"),
+            ("is_unique_reveal",      "IsUniqueReveal"),
+            ("is_repeatable",         "IsRepeatable"),
+            ("is_reveal_immediately", "IsRevealImmediately"),
+            ("is_echo",               "IsEcho"),
+            ("is_force_select",       "IsForceSelect"),
+            ("is_crisis",             "IsCrisis"),
+            ("is_collectible",        "IsCollectible"),
+        ]
+        cols = 2
+        for i, (i18n_key, flag_key) in enumerate(items):
+            r, c = divmod(i, cols)
+            chk = tk.Checkbutton(
+                frame,
+                text=self._t(i18n_key),
+                variable=self.flag_vars[flag_key],
+                command=self.update_preview,
+                anchor="w",
+            )
+            chk.grid(row=r, column=c, sticky="w", padx=5, pady=2)
+            self.widgets[f'chk_{flag_key}'] = chk
+
+            # 기존 코드 호환을 위해 IsRoot 체크박스는 'chk_root'로도 노출
+            if flag_key == "IsRoot":
+                self.widgets['chk_root'] = chk
 
     def _create_stats_section(self, parent):
         """스탯 관련 (심볼, 신도수, 갈림길)"""
@@ -402,8 +479,10 @@ class CardCreatorApp:
             "junction": self.var_junction.get(),
             "effect": self.txt_effect.get("1.0", tk.END).strip(),
             "description": self.txt_desc.get("1.0", tk.END).strip(),
-            "IsRoot": 1 if self.var_is_root.get() else 0
         }
+        # 플래그 8종: 모두 bool로 직렬화 (cardDB.json 포맷과 일치)
+        for flag_key, var in self.flag_vars.items():
+            data[flag_key] = bool(var.get())
         return data
 
 
@@ -430,22 +509,38 @@ class CardCreatorApp:
         self.widgets['group_info'].config(text=L['header_info'])
         self.widgets['lbl_id'].config(text=L['id'])
         self.widgets['lbl_name'].config(text=L['name'])
-        self.widgets['chk_root'].config(text=L['is_root'])
         self.widgets['lbl_desc'].config(text=L['description'])
         self.widgets['lbl_effect'].config(text=L['effect'])
-        
+
         self.widgets['group_stats'].config(text=L['header_stats'])
         self.widgets['lbl_require_symbol'].config(text=L['require_symbol'])
         self.widgets['lbl_gift_symbol'].config(text=L['gift_symbol'])
         self.widgets['lbl_cultist'].config(text=L['cultist'])
         self.widgets['lbl_junction'].config(text=L['junction'])
-        
+
+        # Flags 섹션
+        self.widgets['group_flags'].config(text=L['header_flags'])
+        flag_label_map = {
+            "IsRoot":              "is_root",
+            "IsUniqueReveal":      "is_unique_reveal",
+            "IsRepeatable":        "is_repeatable",
+            "IsRevealImmediately": "is_reveal_immediately",
+            "IsEcho":              "is_echo",
+            "IsForceSelect":       "is_force_select",
+            "IsCrisis":            "is_crisis",
+            "IsCollectible":       "is_collectible",
+        }
+        for flag_key, i18n_key in flag_label_map.items():
+            w = self.widgets.get(f'chk_{flag_key}')
+            if w is not None:
+                w.config(text=L[i18n_key])
+
         self.widgets['group_media'].config(text=L['header_media'])
         self.widgets['lbl_img'].config(text=L['image_path'])
         self.widgets['btn_img_search'].config(text=L['search'])
         self.widgets['lbl_snd'].config(text=L['sound_path'])
         self.widgets['btn_snd_search'].config(text=L['search'])
-        
+
         self.widgets['btn_reset'].config(text=L['reset'])
         self.widgets['btn_load'].config(text=L['load'])
         self.widgets['btn_save_json'].config(text=L['json_save'])
@@ -499,10 +594,12 @@ class CardCreatorApp:
         self.var_species.set("일반")
         self.var_cultist.set(0)
         self.var_junction.set(0)
-        self.var_is_root.set(False)
         self.var_image_path.set("")
         self.var_sound_path.set("")
-        
+
+        for v in self.flag_vars.values():
+            v.set(False)
+
         for v in self.symbol_vars_r:
             v.set(0)
         for v in self.symbol_vars_g:
@@ -581,7 +678,10 @@ class CardCreatorApp:
             self.var_name.set(data.get("name", ""))
             self.var_cultist.set(int(data.get("cultist", 0)))
             self.var_junction.set(int(data.get("junction", 0)))
-            self.var_is_root.set(bool(data.get("IsRoot", 0)))
+
+            # 플래그 8종: 0/1 (구버전) 과 true/false (현버전) 모두 수용
+            for flag_key, var in self.flag_vars.items():
+                var.set(bool(data.get(flag_key, False)))
 
             # Symbol
             sym_r = data.get("symbolR", [0] * 6)
