@@ -1,567 +1,1083 @@
-import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+"""
+Cultist Card Effects Editor (v2)
+================================
+새 스키마(cardsEffects.json: { "<cardId>": { "<trigger>": [<commands>] } })에 맞춰
+재작성한 에디터.
+
+설계 원칙
+- 좌측: 카드 목록 (cardDB.json에서 이름/ID 로드 + 효과 보유 여부 표시)
+- 우측: 선택된 카드의 트리거별 명령 트리. 더블 클릭으로 편집.
+- 명령 편집은 schema-driven. 알려진 필드는 전용 위젯, 모르는 필드는 Raw JSON 박스로 폴백.
+- 다형 값(amount/owner/from)은 모드 전환 콤보로 표현.
+- If.then/else, Sacrifice.then 등 중첩 명령은 같은 CommandListDialog로 재귀 편집.
+
+파일 경로
+- 기본은 스크립트와 같은 폴더의 cardsEffects.json / cardDB.json.
+- 메뉴에서 다른 경로로 열기/저장 가능.
+"""
+
+import copy
 import json
 import os
-import copy
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
-# === 파일 설정 ===
-EFFECTS_FILE = "effects.json"
-DB_FILE = "cardDatabase.json"
-CONFIG_FILE = "schema_config_v8.json"
+# =====================================================================
+# 스키마 정의 — 명령/조건 추가 시 이 섹션만 손대면 된다.
+# =====================================================================
 
-# === 데이터 정의 ===
-RESOURCE_LIST = ["Influence", "Unity", "Monotheism", "Polytheism", "Strength", "Pantheon", "Cultist", "MessiahIdeology"]
-PHASE_ENUMS = [
-    "GameStart", "Draft.Draw", "Main.StandBy", "Main.Draw", "Main.Play", "Main.Reveal", 
-    "Flip", "EnterPlay", "Destroyed", "DestroyAttempt", "AnyTime"
+TRIGGERS = [
+    "OnHand", "OnReveal", "OnRevealCost",
+    "OnClick", "OnDestroyed", "RevealCondition", "Passive",
 ]
 
-# === 기본 스키마 ===
-DEFAULT_CONFIG = {
-    "Kinds": ["trigger", "replacement", "constraint", "continuous", "activated", "requirement"],
-    "Timings": ["OnGameStart", "OnFlip", "OnPlay", "OnPreDestroy", "OnRevealInHand", "OnActivate", "OnTryFlip", "OnTurnEnd", "AnyTime"],
-    
-    "ConditionTypes": {
-        "CompareValue": {"fields": ["valueSource", "operator", "threshold"]},
-        "CheckHistory": {"fields": ["historyTarget", "period", "minCount"]},
-        "SourceIsEnemy": {"fields": []},
-        "Limit_FaceUpCount": {"fields": ["limit", "scope"]}
-    },
+RESOURCES = ["influence", "unity", "monotheism", "polytheism", "strength", "pantheon", "cultist"]
+SYMBOLS   = ["Influence", "Unity", "Monotheism", "Polytheism", "Strength", "Pantheon"]
+STAT_KEYS = ["influence", "unity", "monotheism", "polytheism", "strength", "pantheon", "cultist"]
+ZONES     = ["Field", "Hand", "Deck"]
+COMPARE_OPS = [">", ">=", "<", "<=", "==", "!="]
 
-    "ActionTypes": {
-        "Debug_CrashGame": {"fields": ["message"]},
-        "Phase_Skip": {"fields": ["phaseName"]},
-        "Phase_Add": {"fields": ["phaseName", "amount"]},
-        "Card_SearchAndAdd": {"fields": ["searchSource", "searchFilter", "amount", "selectionType"]},
-        "Force_Select": {"fields": ["target_fixed"]},
-        "Card_Exile": {"fields": ["exileTarget", "targetCardType", "amount"]},
-        "Card_Destroy": {"fields": ["targetPlayer", "targetCardType", "amount", "selectionType"]},
-        "Resource_Gain": {"fields": ["resourceType", "amount"]},
-        "Resource_Gain_Dynamic": {"fields": ["resourceType", "perCount"]},
-        "Action_Trade": {"fields": ["amount"]},
-        "Card_Flip": {"fields": ["target_fixed"]},
-        "Cancel_Event": {"fields": []},
-        "Condition_Fail_Check": {"fields": ["nested_actions"]},
-        "Conditional": {"fields": ["condition_custom", "nested_actions"]},
-        "Add_Starve": {"fields": ["starveTarget", "amount"]},
-        "Allow_Flip": {"fields": []},
-        "Card_Draw": {"fields": ["drawSource", "amount"]}
-    },
+# Phase target 문자열 (Phase 명령에서 사용)
+PHASE_TARGETS = [
+    "Phase.StandBy",
+    "Phase.Draw.StandBy", "Phase.Draw.Draw", "Phase.Draw.Trade",
+    "Phase.Play.Play",
+]
 
-    "FieldDefinitions": {
-        # --- 기본 타입 ---
-        "amount": {"type": "int", "default": 1},
-        "threshold": {"type": "int", "default": 0},
-        "minCount": {"type": "int", "default": 1},
-        "limit": {"type": "int", "default": 1},
-        "message": {"type": "string", "default": "Error"},
-        "perCount": {"type": "string", "default": "MessiahIdeology"},
-        
-        # --- 선택형 ---
-        "phaseName": {"type": "selection_custom", "values": PHASE_ENUMS, "default": "Draft.Draw"},
-        "resourceType": {"type": "selection_custom", "values": RESOURCE_LIST, "default": "Influence"},
-        "searchSource": {"type": "selection_custom", "values": ["Deck", "Trade"], "default": "Deck"},
-        "searchFilter": {"type": "selection_custom", "values": RESOURCE_LIST, "default": "Cultist"},
-        "selectionType": {"type": "selection_custom", "values": ["Essential", "Optional"], "default": "Essential"},
-        "targetCardType": {"type": "selection_custom", "values": ["Cultist", "TargetCard"], "default": "Cultist"},
-        "drawSource": {"type": "selection_custom", "values": ["Deck", "Trade"], "default": "Deck"},
-        "starveTarget": {"type": "selection_custom", "values": ["Self", "Other"], "default": "Self"},
-        "valueSource": {"type": "selection_custom", "values": RESOURCE_LIST, "default": "MessiahIdeology"},
-        "operator": {"type": "selection", "values": [">", ">=", "<", "<=", "==", "!="], "default": ">="},
-        "period": {"type": "selection", "values": ["ThisTurn", "LastTurn"], "default": "ThisTurn"},
-        "historyTarget": {"type": "selection_custom", "values": ["Trade", "DestroyEnemyCard"], "default": "Trade"},
+# 히스토리 카운트에서 쓰는 액션 종류 (필요 시 자유롭게 추가)
+HISTORY_ACTIONS = ["Trade", "Destroy", "Reveal", "Play", "Use", "Exile", "Sacrifice", "Draw"]
 
-        "target_fixed": {"type": "fixed", "value": "Self", "save_key": "target"},
-        
-        "targetPlayer": {
-            "type": "stat_comparison", 
-            "parts": [["Lower", "Higher", "Equal", "Sacrifice"], RESOURCE_LIST + ["Strength"]],
-            "default": "LowerStrength"
-        },
-        
-        # [요청 1] AllPlayers 추가 및 로직 확장
-        "exileTarget": {
-            "type": "exile_mode_selector",
-            "modes": ["CanSelectTarget", "CantSelectTarget", "AllPlayers"],
-            "comparators": ["Lowest", "Highest", "Lower", "Higher", "Equal"],
-            "stats": RESOURCE_LIST + ["Strength"],
-            "default": "CanSelectTarget"
-        },
-        
-        "nested_actions": {"type": "action_list", "save_key": "nested_actions"},
-        "condition_custom": {"type": "condition_object", "save_key": "condition"}
-    }
+# 필드 타입 키워드 — 폼 빌더가 보고 위젯을 고른다.
+#   int, str, bool, select, dynamicInt, amount, owner, from, filter,
+#   condition, commands(=명령 배열), raw
+COMMAND_SCHEMAS = {
+    "Log": [
+        ("msg", "str", "(no msg)"),
+    ],
+    "Get": [
+        ("res", ("select", RESOURCES), "unity"),
+        ("amount", "dynamicInt", 1),
+    ],
+    "Draw": [
+        ("amount", "dynamicInt", 1),
+        ("where", "filter", None),  # optional
+    ],
+    "Trade": [
+        ("target", "owner", "Self"),
+        ("amount", "dynamicInt", 1),
+        ("starveIfFailed", "bool", False),
+    ],
+    "Starve": [
+        ("target", "owner", "Self"),
+        ("amount", "dynamicInt", 1),
+    ],
+    "Destroy": [
+        ("from", "from", None),
+        ("amount", "amount", 1),
+        ("selectionType", ("select", ["Auto", "Manual"]), "Auto"),
+        ("singleOwner", "bool", False),
+        ("bind", "str", ""),
+    ],
+    "Exile": [
+        ("from", "from", None),
+        ("amount", "amount", 1),
+        ("selectionType", ("select", ["Auto", "Manual"]), "Auto"),
+        ("selectionController", ("select", ["Actor", "TargetPlayer"]), "Actor"),
+        ("singleOwner", "bool", False),
+        ("bind", "str", ""),
+    ],
+    "Sacrifice": [
+        ("from", "from", None),
+        ("amount", "dynamicInt", 1),
+        ("selectionType", ("select", ["Auto", "Manual"]), "Manual"),
+        ("bind", "str", ""),
+        ("then", "commands", []),
+    ],
+    "Reveal": [
+        ("from", "from", None),
+        ("amount", "amount", 1),
+        ("selectionType", ("select", ["Auto", "Manual"]), "Auto"),
+    ],
+    "Phase": [
+        ("target", ("select", PHASE_TARGETS), "Phase.Draw.StandBy"),
+        ("type", ("select", ["skip"]), "skip"),
+    ],
+    "SetNextDraw": [
+        ("amount", "dynamicInt", 1),
+        ("skipSelection", "bool", False),
+        ("where", "filter", None),
+    ],
+    "AddTurnCycle": [
+        ("amount", "int", 1),
+    ],
+    "If": [
+        ("condition", "condition", None),
+        ("then", "commands", []),
+        ("else", "commands", []),
+    ],
+    "SetVar": [
+        ("name", "str", "n"),
+        ("value", "dynamicInt", 0),
+    ],
+    "Cancel": [],
 }
 
-class CardEditorApp:
+CONDITION_SCHEMAS = {
+    "HasSymbol": [
+        ("symbol", ("select", SYMBOLS), "Strength"),
+        ("amount", "int", 1),
+        ("target", "owner", "Self"),
+    ],
+    "HasCultist": [
+        ("amount", "int", 1),
+        ("op", ("select", COMPARE_OPS), ">="),
+        ("target", "owner", "Self"),
+    ],
+    "HasCard": [
+        ("cardId", "int", 0),
+        ("zone", ("select", ["Field", "Hand"]), "Field"),
+        ("target", "owner", "Self"),
+    ],
+    "Compare": [
+        ("lhs", "dynamicInt", 0),
+        ("op", ("select", COMPARE_OPS), ">="),
+        ("rhs", "dynamicInt", 0),
+    ],
+}
+
+OWNER_TYPES = ["PlayerLowestStat", "PlayerHighestStat", "OpponentLowerStat", "OpponentHigherStat"]
+OWNER_SIMPLE = ["Self", "All", "Opponent"]
+
+DYNAMIC_INT_KINDS = ["int", "var", "cardCount", "playerStat", "historyCount"]
+AMOUNT_KINDS      = ["int", "All", "range", "var", "cardCount", "playerStat", "historyCount"]
+
+
+# =====================================================================
+# 파일 IO
+# =====================================================================
+
+class Paths:
+    """기본 파일 경로. 메뉴에서 갈아끼울 수 있다."""
+    def __init__(self):
+        base = os.path.dirname(os.path.abspath(__file__))
+        self.effects = os.path.join(base, "cardsEffects.json")
+        self.cardDB  = os.path.join(base, "cardDB.json")
+
+
+def load_json(path, default):
+    if not os.path.exists(path):
+        return copy.deepcopy(default)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        messagebox.showerror("Load Error", f"{path}\n{e}")
+        return copy.deepcopy(default)
+
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+# =====================================================================
+# 다형 값 위젯 — 모든 위젯이 동일하게 .get() / .set(value) 지원
+# =====================================================================
+
+class DynamicIntWidget:
+    """정수 또는 { var | cardCount | playerStat | historyCount } 객체."""
+    def __init__(self, parent, value=0):
+        self.frame = ttk.Frame(parent)
+        self.kind = tk.StringVar()
+        self.cb_kind = ttk.Combobox(self.frame, textvariable=self.kind,
+                                    values=DYNAMIC_INT_KINDS, width=11, state="readonly")
+        self.cb_kind.pack(side="left")
+        self.kind.trace_add("write", lambda *a: self._render())
+        self.body = ttk.Frame(self.frame); self.body.pack(side="left", fill="x", expand=True)
+        self.body_widgets = {}
+        self.set(value)
+
+    def pack(self, **kw): self.frame.pack(**kw)
+    def grid(self, **kw): self.frame.grid(**kw)
+
+    def _render(self):
+        for w in self.body.winfo_children(): w.destroy()
+        self.body_widgets = {}
+        k = self.kind.get()
+        if k == "int":
+            v = tk.StringVar(value=str(self.body_widgets.get("_cached_int", 0)))
+            e = ttk.Entry(self.body, textvariable=v, width=8); e.pack(side="left")
+            self.body_widgets["int"] = v
+        elif k == "var":
+            v = tk.StringVar(value="n")
+            ttk.Label(self.body, text="var=").pack(side="left")
+            ttk.Entry(self.body, textvariable=v, width=10).pack(side="left")
+            self.body_widgets["var"] = v
+        elif k == "cardCount":
+            ttk.Label(self.body, text="(from: ...)").pack(side="left")
+            self.body_widgets["from"] = FromWidget(self.body, value=None)
+            self.body_widgets["from"].pack(side="left", fill="x", expand=True)
+        elif k == "playerStat":
+            stat = tk.StringVar(value="strength")
+            ttk.Label(self.body, text="stat=").pack(side="left")
+            ttk.Combobox(self.body, textvariable=stat, values=STAT_KEYS, width=10).pack(side="left")
+            self.body_widgets["stat"] = stat
+        elif k == "historyCount":
+            action = tk.StringVar(value="Trade")
+            scope  = tk.StringVar(value="Turn")
+            ttk.Label(self.body, text="action=").pack(side="left")
+            ttk.Combobox(self.body, textvariable=action, values=HISTORY_ACTIONS, width=10).pack(side="left")
+            ttk.Label(self.body, text="scope=").pack(side="left")
+            ttk.Combobox(self.body, textvariable=scope, values=["Turn", "Round", "Game"], width=8).pack(side="left")
+            self.body_widgets["action"] = action
+            self.body_widgets["scope"]  = scope
+
+    def get(self):
+        k = self.kind.get()
+        if k == "int":
+            try: return int(self.body_widgets["int"].get())
+            except ValueError: return 0
+        if k == "var":
+            return {"var": self.body_widgets["var"].get()}
+        if k == "cardCount":
+            return {"type": "cardCount", "from": self.body_widgets["from"].get()}
+        if k == "playerStat":
+            return {"type": "playerStat", "stat": self.body_widgets["stat"].get()}
+        if k == "historyCount":
+            return {"type": "historyCount",
+                    "action": self.body_widgets["action"].get(),
+                    "scope":  self.body_widgets["scope"].get()}
+        return 0
+
+    def set(self, value):
+        if isinstance(value, bool) or isinstance(value, int):
+            self.kind.set("int")
+            self.body_widgets.setdefault("_cached_int", int(value))
+            self._render()
+            self.body_widgets["int"].set(str(int(value)))
+            return
+        if isinstance(value, dict):
+            if "var" in value:
+                self.kind.set("var"); self._render()
+                self.body_widgets["var"].set(str(value["var"])); return
+            t = value.get("type")
+            if t == "cardCount":
+                self.kind.set("cardCount"); self._render()
+                self.body_widgets["from"].set(value.get("from")); return
+            if t == "playerStat":
+                self.kind.set("playerStat"); self._render()
+                self.body_widgets["stat"].set(value.get("stat", "strength")); return
+            if t == "historyCount":
+                self.kind.set("historyCount"); self._render()
+                self.body_widgets["action"].set(value.get("action", "Trade"))
+                self.body_widgets["scope"].set(value.get("scope", "Turn")); return
+        # fallback
+        self.kind.set("int"); self._render()
+        self.body_widgets["int"].set("0")
+
+
+class AmountWidget:
+    """amount 전용: int / "All" / {min,max} / dynamicInt 변형들."""
+    def __init__(self, parent, value=1):
+        self.frame = ttk.Frame(parent)
+        self.kind = tk.StringVar()
+        self.cb_kind = ttk.Combobox(self.frame, textvariable=self.kind,
+                                    values=AMOUNT_KINDS, width=9, state="readonly")
+        self.cb_kind.pack(side="left")
+        self.kind.trace_add("write", lambda *a: self._render())
+        self.body = ttk.Frame(self.frame); self.body.pack(side="left", fill="x", expand=True)
+        self.body_widgets = {}
+        self.set(value)
+
+    def pack(self, **kw): self.frame.pack(**kw)
+    def grid(self, **kw): self.frame.grid(**kw)
+
+    def _render(self):
+        for w in self.body.winfo_children(): w.destroy()
+        self.body_widgets = {}
+        k = self.kind.get()
+        if k == "int":
+            v = tk.StringVar(value="1")
+            ttk.Entry(self.body, textvariable=v, width=6).pack(side="left")
+            self.body_widgets["int"] = v
+        elif k == "All":
+            ttk.Label(self.body, text='(literal "All")').pack(side="left")
+        elif k == "range":
+            mn = tk.StringVar(value="0"); mx = tk.StringVar(value="1")
+            ttk.Label(self.body, text="min=").pack(side="left")
+            ttk.Entry(self.body, textvariable=mn, width=4).pack(side="left")
+            ttk.Label(self.body, text="max=").pack(side="left")
+            ttk.Entry(self.body, textvariable=mx, width=4).pack(side="left")
+            self.body_widgets["min"] = mn
+            self.body_widgets["max"] = mx
+        else:
+            # 나머지(var/cardCount/playerStat/historyCount)는 DynamicIntWidget 재활용
+            dw = DynamicIntWidget(self.body, value=0)
+            dw.kind.set(k); dw._render()
+            dw.pack(side="left", fill="x", expand=True)
+            self.body_widgets["dyn"] = dw
+
+    def get(self):
+        k = self.kind.get()
+        if k == "int":
+            try: return int(self.body_widgets["int"].get())
+            except ValueError: return 0
+        if k == "All":
+            return "All"
+        if k == "range":
+            try: mn = int(self.body_widgets["min"].get())
+            except ValueError: mn = 0
+            try: mx = int(self.body_widgets["max"].get())
+            except ValueError: mx = mn
+            return {"min": mn, "max": mx}
+        return self.body_widgets["dyn"].get()
+
+    def set(self, value):
+        if isinstance(value, str) and value.lower() == "all":
+            self.kind.set("All"); self._render(); return
+        if isinstance(value, dict) and ("min" in value or "max" in value):
+            self.kind.set("range"); self._render()
+            self.body_widgets["min"].set(str(value.get("min", 0)))
+            self.body_widgets["max"].set(str(value.get("max", 1)))
+            return
+        if isinstance(value, dict):
+            # dynamicInt 변형으로 위임
+            if "var" in value: self.kind.set("var")
+            elif value.get("type") == "cardCount":    self.kind.set("cardCount")
+            elif value.get("type") == "playerStat":   self.kind.set("playerStat")
+            elif value.get("type") == "historyCount": self.kind.set("historyCount")
+            else: self.kind.set("int")
+            self._render()
+            if "dyn" in self.body_widgets:
+                self.body_widgets["dyn"].set(value)
+            return
+        # int
+        self.kind.set("int"); self._render()
+        try: self.body_widgets["int"].set(str(int(value)))
+        except Exception: self.body_widgets["int"].set("0")
+
+
+class OwnerWidget:
+    """Self / All / Opponent / 통계 기반 객체 / { var }."""
+    def __init__(self, parent, value="Self"):
+        self.frame = ttk.Frame(parent)
+        self.kind = tk.StringVar()
+        kinds = OWNER_SIMPLE + OWNER_TYPES + ["var"]
+        self.cb = ttk.Combobox(self.frame, textvariable=self.kind, values=kinds, width=18, state="readonly")
+        self.cb.pack(side="left")
+        self.kind.trace_add("write", lambda *a: self._render())
+        self.body = ttk.Frame(self.frame); self.body.pack(side="left", fill="x", expand=True)
+        self.body_widgets = {}
+        self.set(value)
+
+    def pack(self, **kw): self.frame.pack(**kw)
+    def grid(self, **kw): self.frame.grid(**kw)
+
+    def _render(self):
+        for w in self.body.winfo_children(): w.destroy()
+        self.body_widgets = {}
+        k = self.kind.get()
+        if k in OWNER_TYPES:
+            stat = tk.StringVar(value="strength")
+            ttk.Label(self.body, text="stat=").pack(side="left")
+            ttk.Combobox(self.body, textvariable=stat, values=STAT_KEYS, width=10).pack(side="left")
+            self.body_widgets["stat"] = stat
+        elif k == "var":
+            v = tk.StringVar(value="targetP")
+            ttk.Label(self.body, text="var=").pack(side="left")
+            ttk.Entry(self.body, textvariable=v, width=10).pack(side="left")
+            self.body_widgets["var"] = v
+
+    def get(self):
+        k = self.kind.get()
+        if k in OWNER_SIMPLE: return k
+        if k in OWNER_TYPES:  return {"type": k, "stat": self.body_widgets["stat"].get()}
+        if k == "var":        return {"var": self.body_widgets["var"].get()}
+        return "Self"
+
+    def set(self, value):
+        if value is None:
+            self.kind.set("Self"); self._render(); return
+        if isinstance(value, str):
+            self.kind.set(value if value in OWNER_SIMPLE else "Self")
+            self._render(); return
+        if isinstance(value, dict):
+            if "var" in value:
+                self.kind.set("var"); self._render()
+                self.body_widgets["var"].set(str(value["var"])); return
+            t = value.get("type")
+            if t in OWNER_TYPES:
+                self.kind.set(t); self._render()
+                self.body_widgets["stat"].set(value.get("stat", "strength")); return
+        self.kind.set("Self"); self._render()
+
+
+class FilterWidget:
+    """필터 객체. 잘 알려진 필드 + Raw JSON 폴백."""
+    KNOWN_BOOLS = ["isCultistCard", "isRevealed", "inSect", "inSectOfCause"]
+
+    def __init__(self, parent, value=None):
+        self.frame = ttk.LabelFrame(parent, text="filter")
+        self.bool_vars = {k: tk.BooleanVar(value=False) for k in self.KNOWN_BOOLS}
+        for k, var in self.bool_vars.items():
+            ttk.Checkbutton(self.frame, text=k, variable=var).pack(anchor="w")
+
+        row = ttk.Frame(self.frame); row.pack(fill="x", pady=2)
+        ttk.Label(row, text="cardIds (쉼표):").pack(side="left")
+        self.var_cardIds = tk.StringVar(value="")
+        ttk.Entry(row, textvariable=self.var_cardIds, width=20).pack(side="left")
+
+        row2 = ttk.Frame(self.frame); row2.pack(fill="x", pady=2)
+        ttk.Label(row2, text="cultist op/val:").pack(side="left")
+        self.var_cult_op = tk.StringVar(value="")
+        ttk.Combobox(row2, textvariable=self.var_cult_op,
+                     values=[""] + COMPARE_OPS, width=4).pack(side="left")
+        self.var_cult_val = tk.StringVar(value="")
+        ttk.Entry(row2, textvariable=self.var_cult_val, width=6).pack(side="left")
+
+        ttk.Label(self.frame, text="extra (raw JSON, 옵션):").pack(anchor="w")
+        self.txt_extra = tk.Text(self.frame, height=3, width=30)
+        self.txt_extra.pack(fill="x")
+        self.set(value)
+
+    def pack(self, **kw): self.frame.pack(**kw)
+    def grid(self, **kw): self.frame.grid(**kw)
+
+    def get(self):
+        out = {}
+        for k, var in self.bool_vars.items():
+            if var.get(): out[k] = True
+        ids_str = self.var_cardIds.get().strip()
+        if ids_str:
+            try:
+                out["cardIds"] = [int(x) for x in ids_str.split(",") if x.strip()]
+            except ValueError:
+                pass
+        op = self.var_cult_op.get().strip()
+        val = self.var_cult_val.get().strip()
+        if op and val:
+            try: out["cultist"] = {"op": op, "value": int(val)}
+            except ValueError: pass
+        elif val:
+            try: out["cultist"] = int(val)
+            except ValueError: pass
+        extra = self.txt_extra.get("1.0", tk.END).strip()
+        if extra:
+            try:
+                merged = json.loads(extra)
+                if isinstance(merged, dict):
+                    for k, v in merged.items():
+                        out.setdefault(k, v)
+            except Exception:
+                pass
+        return out or None
+
+    def set(self, value):
+        for var in self.bool_vars.values(): var.set(False)
+        self.var_cardIds.set("")
+        self.var_cult_op.set("")
+        self.var_cult_val.set("")
+        self.txt_extra.delete("1.0", tk.END)
+        if not isinstance(value, dict): return
+        leftover = {}
+        for k, v in value.items():
+            if k in self.bool_vars:
+                self.bool_vars[k].set(bool(v))
+            elif k == "cardIds" and isinstance(v, list):
+                self.var_cardIds.set(",".join(str(x) for x in v))
+            elif k == "cultist":
+                if isinstance(v, dict):
+                    self.var_cult_op.set(v.get("op", ""))
+                    self.var_cult_val.set(str(v.get("value", "")))
+                else:
+                    self.var_cult_val.set(str(v))
+            else:
+                leftover[k] = v
+        if leftover:
+            self.txt_extra.insert("1.0", json.dumps(leftover, ensure_ascii=False, indent=2))
+
+
+class FromWidget:
+    """{ owner, zone, filter } 복합 위젯."""
+    def __init__(self, parent, value=None):
+        self.frame = ttk.LabelFrame(parent, text="from")
+
+        row1 = ttk.Frame(self.frame); row1.pack(fill="x", pady=2)
+        ttk.Label(row1, text="owner:").pack(side="left")
+        self.owner = OwnerWidget(row1, value="Self")
+        self.owner.pack(side="left", fill="x", expand=True)
+
+        row2 = ttk.Frame(self.frame); row2.pack(fill="x", pady=2)
+        ttk.Label(row2, text="zone:").pack(side="left")
+        self.var_zone = tk.StringVar(value="Field")
+        ttk.Combobox(row2, textvariable=self.var_zone, values=ZONES, width=8, state="readonly").pack(side="left")
+
+        self.filter = FilterWidget(self.frame, value=None)
+        self.filter.pack(fill="x")
+
+        self.set(value)
+
+    def pack(self, **kw): self.frame.pack(**kw)
+    def grid(self, **kw): self.frame.grid(**kw)
+
+    def get(self):
+        out = {"owner": self.owner.get(), "zone": self.var_zone.get()}
+        f = self.filter.get()
+        if f: out["filter"] = f
+        return out
+
+    def set(self, value):
+        if not isinstance(value, dict):
+            self.owner.set("Self"); self.var_zone.set("Field"); self.filter.set(None); return
+        self.owner.set(value.get("owner", "Self"))
+        self.var_zone.set(value.get("zone", "Field"))
+        self.filter.set(value.get("filter"))
+
+
+# =====================================================================
+# 조건 / 명령 편집 다이얼로그
+# =====================================================================
+
+class ConditionWidget:
+    """If.condition 객체. 타입 콤보 + 타입별 폼."""
+    def __init__(self, parent, value=None):
+        self.frame = ttk.LabelFrame(parent, text="condition")
+        head = ttk.Frame(self.frame); head.pack(fill="x")
+        ttk.Label(head, text="type:").pack(side="left")
+        self.var_type = tk.StringVar()
+        self.cb_type = ttk.Combobox(head, textvariable=self.var_type,
+                                    values=list(CONDITION_SCHEMAS.keys()), state="readonly", width=14)
+        self.cb_type.pack(side="left")
+        self.body = ttk.Frame(self.frame); self.body.pack(fill="x")
+        self.var_type.trace_add("write", lambda *a: self._render())
+        self.fields = {}
+        self.set(value)
+
+    def pack(self, **kw): self.frame.pack(**kw)
+    def grid(self, **kw): self.frame.grid(**kw)
+
+    def _render(self):
+        for w in self.body.winfo_children(): w.destroy()
+        self.fields = {}
+        schema = CONDITION_SCHEMAS.get(self.var_type.get(), [])
+        for name, ftype, default in schema:
+            row = ttk.Frame(self.body); row.pack(fill="x", pady=1)
+            ttk.Label(row, text=f"{name}:", width=10).pack(side="left")
+            w = _build_field_widget(row, ftype, default)
+            w.pack(side="left", fill="x", expand=True)
+            self.fields[name] = (w, ftype)
+
+    def get(self):
+        out = {"type": self.var_type.get()}
+        for name, (w, ftype) in self.fields.items():
+            out[name] = _read_field(w, ftype)
+        return out
+
+    def set(self, value):
+        if isinstance(value, dict) and "type" in value and value["type"] in CONDITION_SCHEMAS:
+            self.var_type.set(value["type"])
+            self._render()
+            for name, (w, ftype) in self.fields.items():
+                if name in value:
+                    _write_field(w, ftype, value[name])
+        else:
+            self.var_type.set("Compare")
+
+
+# ---- 폼 빌더 헬퍼 ----
+
+def _build_field_widget(parent, ftype, default):
+    if ftype == "int":
+        v = tk.StringVar(value=str(default if default is not None else 0))
+        e = ttk.Entry(parent, textvariable=v, width=10); e._var = v; e._kind = "int"
+        return e
+    if ftype == "str":
+        v = tk.StringVar(value=str(default or ""))
+        e = ttk.Entry(parent, textvariable=v); e._var = v; e._kind = "str"
+        return e
+    if ftype == "bool":
+        v = tk.BooleanVar(value=bool(default))
+        c = ttk.Checkbutton(parent, variable=v); c._var = v; c._kind = "bool"
+        return c
+    if isinstance(ftype, tuple) and ftype[0] == "select":
+        v = tk.StringVar(value=str(default or (ftype[1][0] if ftype[1] else "")))
+        cb = ttk.Combobox(parent, textvariable=v, values=ftype[1], state="readonly", width=14)
+        cb._var = v; cb._kind = "select"; return cb
+    if ftype == "dynamicInt":
+        return DynamicIntWidget(parent, value=default if default is not None else 0)
+    if ftype == "amount":
+        return AmountWidget(parent, value=default if default is not None else 1)
+    if ftype == "owner":
+        return OwnerWidget(parent, value=default or "Self")
+    if ftype == "from":
+        return FromWidget(parent, value=default)
+    if ftype == "filter":
+        return FilterWidget(parent, value=default)
+    if ftype == "condition":
+        return ConditionWidget(parent, value=default)
+    if ftype == "commands":
+        return CommandListField(parent, value=default or [])
+    # fallback: Raw JSON entry
+    v = tk.StringVar(value=json.dumps(default) if default is not None else "")
+    e = ttk.Entry(parent, textvariable=v); e._var = v; e._kind = "raw"
+    return e
+
+
+def _read_field(widget, ftype):
+    if hasattr(widget, "_kind"):
+        if widget._kind == "int":
+            try: return int(widget._var.get())
+            except ValueError: return 0
+        if widget._kind == "str":   return widget._var.get()
+        if widget._kind == "bool":  return bool(widget._var.get())
+        if widget._kind == "select":return widget._var.get()
+        if widget._kind == "raw":
+            s = widget._var.get().strip()
+            if not s: return None
+            try: return json.loads(s)
+            except Exception: return s
+    return widget.get()
+
+
+def _write_field(widget, ftype, value):
+    if hasattr(widget, "_kind"):
+        if widget._kind in ("int", "str", "select"):
+            widget._var.set("" if value is None else str(value)); return
+        if widget._kind == "bool":
+            widget._var.set(bool(value)); return
+        if widget._kind == "raw":
+            widget._var.set("" if value is None else json.dumps(value, ensure_ascii=False)); return
+    widget.set(value)
+
+
+class CommandListField:
+    """명령 배열을 다루는 필드. 버튼을 누르면 CommandListDialog가 뜬다."""
+    def __init__(self, parent, value=None):
+        self.frame = ttk.Frame(parent)
+        self.data = list(value or [])
+        self.lbl = ttk.Label(self.frame, text=self._summary())
+        self.lbl.pack(side="left", padx=5)
+        ttk.Button(self.frame, text="Edit...", command=self._open).pack(side="left")
+
+    def pack(self, **kw): self.frame.pack(**kw)
+    def grid(self, **kw): self.frame.grid(**kw)
+
+    def _summary(self):
+        n = len(self.data)
+        if n == 0: return "(empty)"
+        names = ", ".join(c.get("cmd", "?") for c in self.data[:3])
+        more = f" +{n-3}" if n > 3 else ""
+        return f"{n}개: {names}{more}"
+
+    def _open(self):
+        CommandListDialog(self.frame, self.data, self._on_save)
+
+    def _on_save(self, new_list):
+        self.data = new_list
+        self.lbl.config(text=self._summary())
+
+    def get(self):  return list(self.data)
+    def set(self, value):
+        self.data = list(value or [])
+        self.lbl.config(text=self._summary())
+
+
+# =====================================================================
+# 명령 편집 다이얼로그 (단일 명령 하나)
+# =====================================================================
+
+class CommandDialog:
+    def __init__(self, parent, data, on_save):
+        self.on_save = on_save
+        self.win = tk.Toplevel(parent)
+        self.win.title("Command")
+        self.win.geometry("640x600")
+        self.original = copy.deepcopy(data) if data else {}
+
+        head = ttk.Frame(self.win); head.pack(fill="x", padx=8, pady=5)
+        ttk.Label(head, text="cmd:").pack(side="left")
+        self.var_cmd = tk.StringVar(value=self.original.get("cmd", "Log"))
+        self.cb = ttk.Combobox(head, textvariable=self.var_cmd,
+                               values=list(COMMAND_SCHEMAS.keys()), state="readonly", width=18)
+        self.cb.pack(side="left")
+        self.var_cmd.trace_add("write", lambda *a: self._render())
+
+        self.body = ttk.Frame(self.win); self.body.pack(fill="both", expand=True, padx=8, pady=5)
+        self.fields = {}
+
+        # 알려지지 않은 필드는 Raw JSON 탭으로
+        ttk.Label(self.win, text="Unknown fields (raw JSON):").pack(anchor="w", padx=8)
+        self.txt_extra = tk.Text(self.win, height=4)
+        self.txt_extra.pack(fill="x", padx=8)
+
+        btns = ttk.Frame(self.win); btns.pack(fill="x", pady=6)
+        ttk.Button(btns, text="Save", command=self._save).pack(side="right", padx=8)
+        ttk.Button(btns, text="Cancel", command=self.win.destroy).pack(side="right")
+
+        self._render()
+
+    def _render(self):
+        for w in self.body.winfo_children(): w.destroy()
+        self.fields = {}
+        cmd = self.var_cmd.get()
+        schema = COMMAND_SCHEMAS.get(cmd, [])
+
+        # 알려진 필드명 집합으로 leftover 분리
+        known = {n for n, _, _ in schema}
+
+        for name, ftype, default in schema:
+            row = ttk.Frame(self.body); row.pack(fill="x", pady=2)
+            ttk.Label(row, text=f"{name}:", width=14).pack(side="left", anchor="n")
+            val = self.original.get(name, default)
+            w = _build_field_widget(row, ftype, val)
+            w.pack(side="left", fill="x", expand=True)
+            # 기존 값 주입 (build_field_widget이 default로 받았으므로 set 한 번 더)
+            if name in self.original:
+                _write_field(w, ftype, self.original[name])
+            self.fields[name] = (w, ftype)
+
+        # leftover → 텍스트 박스
+        leftover = {k: v for k, v in self.original.items()
+                    if k != "cmd" and k not in known}
+        self.txt_extra.delete("1.0", tk.END)
+        if leftover:
+            self.txt_extra.insert("1.0", json.dumps(leftover, ensure_ascii=False, indent=2))
+
+    def _save(self):
+        out = {"cmd": self.var_cmd.get()}
+        for name, (w, ftype) in self.fields.items():
+            val = _read_field(w, ftype)
+            # 빈 문자열/None/빈 컬렉션은 옵션으로 보고 누락
+            if val is None: continue
+            if isinstance(val, str) and val == "": continue
+            if isinstance(val, list) and len(val) == 0: continue
+            if isinstance(val, dict) and len(val) == 0: continue
+            out[name] = val
+
+        extra_txt = self.txt_extra.get("1.0", tk.END).strip()
+        if extra_txt:
+            try:
+                extra = json.loads(extra_txt)
+                if isinstance(extra, dict):
+                    for k, v in extra.items():
+                        out.setdefault(k, v)
+            except Exception as e:
+                messagebox.showerror("Raw JSON error", str(e)); return
+
+        self.on_save(out)
+        self.win.destroy()
+
+
+# =====================================================================
+# 명령 리스트 다이얼로그 (트리거 안의 명령 배열)
+# =====================================================================
+
+class CommandListDialog:
+    def __init__(self, parent, data_list, on_save, title="Commands"):
+        self.on_save = on_save
+        self.data = copy.deepcopy(data_list)
+        self.win = tk.Toplevel(parent)
+        self.win.title(title)
+        self.win.geometry("500x400")
+
+        self.lst = tk.Listbox(self.win)
+        self.lst.pack(fill="both", expand=True, padx=6, pady=6)
+        self.lst.bind("<Double-1>", lambda e: self._edit())
+
+        bf = ttk.Frame(self.win); bf.pack(fill="x", padx=6)
+        ttk.Button(bf, text="Add",    command=self._add).pack(side="left")
+        ttk.Button(bf, text="Edit",   command=self._edit).pack(side="left")
+        ttk.Button(bf, text="Up",     command=lambda: self._move(-1)).pack(side="left")
+        ttk.Button(bf, text="Down",   command=lambda: self._move(+1)).pack(side="left")
+        ttk.Button(bf, text="Remove", command=self._remove).pack(side="left")
+
+        ok = ttk.Frame(self.win); ok.pack(fill="x", pady=6)
+        ttk.Button(ok, text="OK",     command=self._ok).pack(side="right", padx=6)
+        ttk.Button(ok, text="Cancel", command=self.win.destroy).pack(side="right")
+        self._refresh()
+
+    def _refresh(self):
+        self.lst.delete(0, tk.END)
+        for c in self.data:
+            label = c.get("cmd", "?")
+            short = ""
+            if "amount" in c: short += f" amount={_short(c['amount'])}"
+            if "res"    in c: short += f" res={c['res']}"
+            if "from"   in c and isinstance(c["from"], dict):
+                short += f" owner={_short(c['from'].get('owner'))}"
+                short += f" zone={c['from'].get('zone')}"
+            self.lst.insert(tk.END, f"{label}{short}")
+
+    def _selected(self):
+        sel = self.lst.curselection()
+        return sel[0] if sel else None
+
+    def _add(self):
+        CommandDialog(self.win, {}, lambda d: (self.data.append(d), self._refresh()))
+
+    def _edit(self):
+        idx = self._selected()
+        if idx is None: return
+        CommandDialog(self.win, self.data[idx], lambda d: (self.data.__setitem__(idx, d), self._refresh()))
+
+    def _remove(self):
+        idx = self._selected()
+        if idx is None: return
+        del self.data[idx]; self._refresh()
+
+    def _move(self, dx):
+        idx = self._selected()
+        if idx is None: return
+        j = idx + dx
+        if 0 <= j < len(self.data):
+            self.data[idx], self.data[j] = self.data[j], self.data[idx]
+            self._refresh()
+            self.lst.selection_set(j)
+
+    def _ok(self):
+        self.on_save(self.data); self.win.destroy()
+
+
+def _short(v, n=14):
+    s = json.dumps(v, ensure_ascii=False) if not isinstance(v, str) else v
+    return s if len(s) <= n else s[:n] + "…"
+
+
+# =====================================================================
+# 메인 앱
+# =====================================================================
+
+class EffectsEditorApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Final Card Editor v8 (Double Click & AllPlayers)")
-        self.root.geometry("1300x850")
+        self.paths = Paths()
+        self.effects = {}    # { "cardId": { "trigger": [commands] } }
+        self.cards = {}      # { int_id: name }
+        self.selected_id = None
 
-        self.schema_config = self.load_json(CONFIG_FILE, DEFAULT_CONFIG)
-        self.effects_data = self.load_effects()
-        self.card_db = self.load_card_db()
-        
-        self.setup_ui()
+        root.title("Cultist Effects Editor v2")
+        root.geometry("1280x760")
 
-    def load_json(self, path, default):
-        if not os.path.exists(path): return default
+        self._build_menu()
+        self._build_ui()
+        self._load_files()
+
+    # ---- 메뉴 ----
+    def _build_menu(self):
+        m = tk.Menu(self.root); self.root.config(menu=m)
+        fm = tk.Menu(m, tearoff=0); m.add_cascade(label="File", menu=fm)
+        fm.add_command(label="Reload",         command=self._load_files)
+        fm.add_command(label="Save effects",   command=self._save_effects)
+        fm.add_separator()
+        fm.add_command(label="Open effects.json...", command=self._pick_effects)
+        fm.add_command(label="Open cardDB.json...",  command=self._pick_carddb)
+
+    def _pick_effects(self):
+        p = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+        if p: self.paths.effects = p; self._load_files()
+
+    def _pick_carddb(self):
+        p = filedialog.askopenfilename(filetypes=[("JSON", "*.json")])
+        if p: self.paths.cardDB = p; self._load_files()
+
+    # ---- UI ----
+    def _build_ui(self):
+        paned = tk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        paned.pack(fill="both", expand=True)
+
+        # 왼쪽: 카드 목록
+        left = ttk.Frame(paned); paned.add(left, width=320)
+        ttk.Label(left, text="Cards (★=효과 있음)").pack(anchor="w", padx=4)
+
+        self.var_search = tk.StringVar()
+        sf = ttk.Frame(left); sf.pack(fill="x", padx=4)
+        ttk.Label(sf, text="🔍").pack(side="left")
+        ttk.Entry(sf, textvariable=self.var_search).pack(side="left", fill="x", expand=True)
+        self.var_search.trace_add("write", lambda *a: self._refresh_card_list())
+
+        self.tv = ttk.Treeview(left, columns=("id", "name", "has"), show="headings")
+        for col, t, w in [("id", "ID", 60), ("name", "Name", 180), ("has", "FX", 40)]:
+            self.tv.heading(col, text=t); self.tv.column(col, width=w, anchor="w")
+        self.tv.pack(fill="both", expand=True)
+        self.tv.bind("<<TreeviewSelect>>", self._on_card_selected)
+
+        # 오른쪽: 트리거 + 명령
+        right = ttk.Frame(paned); paned.add(right)
+        self.lbl_card = ttk.Label(right, text="(카드를 선택하세요)", font=("Arial", 12, "bold"))
+        self.lbl_card.pack(anchor="w", padx=8, pady=4)
+
+        self.notebook = ttk.Notebook(right); self.notebook.pack(fill="both", expand=True, padx=6)
+        self.trigger_pages = {}      # trigger -> {frame, listbox}
+
+        for trig in TRIGGERS:
+            page = ttk.Frame(self.notebook)
+            self.notebook.add(page, text=trig)
+
+            lst = tk.Listbox(page); lst.pack(fill="both", expand=True, padx=4, pady=4)
+            lst.bind("<Double-1>", lambda e, t=trig: self._edit_command(t))
+
+            bf = ttk.Frame(page); bf.pack(fill="x", padx=4)
+            ttk.Button(bf, text="Add",    command=lambda t=trig: self._add_command(t)).pack(side="left")
+            ttk.Button(bf, text="Edit",   command=lambda t=trig: self._edit_command(t)).pack(side="left")
+            ttk.Button(bf, text="Up",     command=lambda t=trig: self._move_command(t, -1)).pack(side="left")
+            ttk.Button(bf, text="Down",   command=lambda t=trig: self._move_command(t, +1)).pack(side="left")
+            ttk.Button(bf, text="Remove", command=lambda t=trig: self._remove_command(t)).pack(side="left")
+            ttk.Button(bf, text="Clear trigger", command=lambda t=trig: self._clear_trigger(t)).pack(side="right")
+
+            self.trigger_pages[trig] = {"lst": lst}
+
+        save_bar = ttk.Frame(right); save_bar.pack(fill="x", pady=6)
+        ttk.Button(save_bar, text="SAVE EFFECTS",
+                   command=self._save_effects).pack(side="right", padx=8)
+
+    # ---- 파일 로딩 ----
+    def _load_files(self):
+        self.cards   = {}
+        card_data = load_json(self.paths.cardDB, {"cards": []})
+        for c in card_data.get("cards", []):
+            try: self.cards[int(c["id"])] = c.get("name", f"Card {c['id']}")
+            except Exception: pass
+
+        self.effects = load_json(self.paths.effects, {})
+        # cardId 키는 문자열로 유지 (JSON 표준)
+        # 카드 목록에 없는 cardId가 있다면 함께 보이도록 함
+        self._refresh_card_list()
+
+    def _save_effects(self):
         try:
-            with open(path, 'r', encoding='utf-8') as f: return json.load(f)
-        except: return default
-
-    def load_effects(self):
-        data = self.load_json(EFFECTS_FILE, {"schema": "v6", "effects": [], "cardBindings": []})
-        if "effects" not in data: data["effects"] = []
-        if "cardBindings" not in data: data["cardBindings"] = []
-        return data
-
-    def load_card_db(self):
-        data = self.load_json(DB_FILE, {"cards": []})
-        return {c.get("id"): c.get("name", "Unknown") for c in data.get("cards", [])}
-
-    def save_all(self):
-        try:
-            self.effects_data["effects"].sort(key=lambda x: x.get("id", ""))
-            self.effects_data["cardBindings"].sort(key=lambda x: int(x.get("cardId", 0)))
-            
-            with open(EFFECTS_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.effects_data, f, indent=2, ensure_ascii=False)
-            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.schema_config, f, indent=2, ensure_ascii=False)
-            messagebox.showinfo("저장 완료", "effects.json 및 스키마 설정이 저장되었습니다.")
+            save_json(self.paths.effects, self.effects)
+            messagebox.showinfo("Saved", f"{self.paths.effects}\n저장 완료")
         except Exception as e:
-            messagebox.showerror("오류", f"저장 중 오류 발생: {e}")
+            messagebox.showerror("Save Error", str(e))
 
-    # === UI Setup ===
-    def setup_ui(self):
-        tab_control = ttk.Notebook(self.root)
-        self.tab_effects = ttk.Frame(tab_control)
-        self.tab_bindings = ttk.Frame(tab_control)
-        tab_control.add(self.tab_effects, text="Effect Manager")
-        tab_control.add(self.tab_bindings, text="Card Bindings")
-        tab_control.pack(expand=1, fill="both")
-        self.setup_effects_tab()
-        self.setup_bindings_tab()
-        ttk.Button(self.root, text="SAVE ALL", command=self.save_all).pack(fill="x", pady=5)
+    # ---- 카드 리스트 ----
+    def _refresh_card_list(self):
+        for it in self.tv.get_children(): self.tv.delete(it)
+        q = self.var_search.get().strip().lower()
+        # 카드DB + 효과에만 존재하는 cardId 합집합
+        ids = set(self.cards.keys())
+        for k in self.effects.keys():
+            try: ids.add(int(k))
+            except ValueError: pass
+        for cid in sorted(ids):
+            name = self.cards.get(cid, "(unknown)")
+            has = "★" if str(cid) in self.effects else ""
+            if q and q not in str(cid) and q not in name.lower():
+                continue
+            self.tv.insert("", "end", iid=str(cid), values=(cid, name, has))
 
-    def setup_effects_tab(self):
-        paned = tk.PanedWindow(self.tab_effects, orient=tk.HORIZONTAL)
-        paned.pack(fill="both", expand=True, padx=5, pady=5)
-
-        left_frame = ttk.LabelFrame(paned, text="Effects List")
-        paned.add(left_frame, width=300)
-        self.eff_listbox = tk.Listbox(left_frame)
-        self.eff_listbox.pack(fill="both", expand=True)
-        self.eff_listbox.bind("<<ListboxSelect>>", self.on_effect_select)
-        
-        bf = ttk.Frame(left_frame)
-        bf.pack(fill="x")
-        ttk.Button(bf, text="New", command=self.add_new_effect).pack(side="left", expand=True)
-        ttk.Button(bf, text="Del", command=self.delete_effect).pack(side="left", expand=True)
-
-        right_frame = ttk.Frame(paned)
-        paned.add(right_frame)
-
-        info_frame = ttk.LabelFrame(right_frame, text="Info")
-        info_frame.pack(fill="x", pady=5)
-        ttk.Label(info_frame, text="ID:").pack(side=tk.LEFT)
-        self.var_eff_id = tk.StringVar()
-        ttk.Entry(info_frame, textvariable=self.var_eff_id, width=10).pack(side=tk.LEFT)
-        ttk.Label(info_frame, text="Raw:").pack(side=tk.LEFT)
-        self.var_eff_raw = tk.StringVar()
-        ttk.Entry(info_frame, textvariable=self.var_eff_raw).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(info_frame, text="Update", command=self.update_effect_info).pack(side=tk.LEFT)
-
-        comp_frame = ttk.LabelFrame(right_frame, text="Components")
-        comp_frame.pack(fill="both", expand=True, pady=5)
-        self.comp_tree = ttk.Treeview(comp_frame, columns=("Kind", "Timing", "Actions"), show="headings")
-        self.comp_tree.heading("Kind", text="Kind"); self.comp_tree.heading("Timing", text="Timing"); self.comp_tree.heading("Actions", text="Actions")
-        self.comp_tree.pack(fill="both", expand=True)
-        
-        # [요청 2] 더블 클릭 시 편집
-        self.comp_tree.bind("<Double-1>", lambda e: self.edit_component())
-        
-        cbf = ttk.Frame(comp_frame)
-        cbf.pack(fill="x")
-        ttk.Button(cbf, text="Add Component", command=self.add_component).pack(side="left")
-        ttk.Button(cbf, text="Edit", command=self.edit_component).pack(side="left")
-        ttk.Button(cbf, text="Remove", command=self.remove_component).pack(side="left")
-
-        self.current_eff_index = -1
-        self.refresh_effect_list()
-
-    def refresh_effect_list(self):
-        self.eff_listbox.delete(0, tk.END)
-        for eff in self.effects_data["effects"]:
-            self.eff_listbox.insert(tk.END, f"[{eff.get('id')}] {eff.get('raw', '')[:30]}")
-
-    def on_effect_select(self, event):
-        sel = self.eff_listbox.curselection()
+    def _on_card_selected(self, _e=None):
+        sel = self.tv.selection()
         if not sel: return
-        self.current_eff_index = sel[0]
-        eff = self.effects_data["effects"][self.current_eff_index]
-        self.var_eff_id.set(eff.get("id", ""))
-        self.var_eff_raw.set(eff.get("raw", ""))
-        self.refresh_comp_tree(eff.get("components", []))
+        cid = sel[0]
+        self.selected_id = cid
+        name = self.cards.get(int(cid), "(unknown)")
+        self.lbl_card.config(text=f"[{cid}] {name}")
+        self._refresh_all_triggers()
 
-    def refresh_comp_tree(self, components):
-        for item in self.comp_tree.get_children(): self.comp_tree.delete(item)
-        for i, comp in enumerate(components):
-            actions = comp.get("actions", [])
-            if not actions and "replaceWith" in comp: actions = comp.get("replaceWith", [])
-            summary = ", ".join([a.get("action", "?") for a in actions])
-            self.comp_tree.insert("", "end", iid=i, values=(comp.get("kind"), comp.get("timing"), summary))
+    # ---- 트리거 편집 ----
+    def _refresh_all_triggers(self):
+        if self.selected_id is None: return
+        card_fx = self.effects.get(self.selected_id, {})
+        for trig, page in self.trigger_pages.items():
+            page["lst"].delete(0, tk.END)
+            for cmd in card_fx.get(trig, []):
+                page["lst"].insert(tk.END, self._summarize_cmd(cmd))
 
-    def add_new_effect(self):
-        new_id = f"E{len(self.effects_data['effects']):02d}"
-        self.effects_data["effects"].append({"id": new_id, "raw": "New", "components": []})
-        self.refresh_effect_list()
+    def _summarize_cmd(self, cmd):
+        if not isinstance(cmd, dict): return str(cmd)
+        # RevealCondition은 condition 객체가 직접 들어감 (cmd가 없음)
+        if "cmd" not in cmd and "type" in cmd:
+            return f"Cond:{cmd['type']} {_short(cmd, 60)}"
+        s = cmd.get("cmd", "?")
+        extras = []
+        for k in ("res", "amount", "target", "selectionType"):
+            if k in cmd: extras.append(f"{k}={_short(cmd[k])}")
+        return s + (" | " + ", ".join(extras) if extras else "")
 
-    def delete_effect(self):
-        if self.current_eff_index == -1: return
-        del self.effects_data["effects"][self.current_eff_index]
-        self.current_eff_index = -1
-        self.refresh_effect_list()
-        self.refresh_comp_tree([])
+    def _get_trigger_list(self, trig):
+        if self.selected_id is None: return None
+        card_fx = self.effects.setdefault(self.selected_id, {})
+        return card_fx.setdefault(trig, [])
 
-    def update_effect_info(self):
-        if self.current_eff_index != -1:
-            self.effects_data["effects"][self.current_eff_index].update({"id": self.var_eff_id.get(), "raw": self.var_eff_raw.get()})
-            self.refresh_effect_list()
+    def _add_command(self, trig):
+        lst = self._get_trigger_list(trig)
+        if lst is None: return
+        # RevealCondition은 condition 객체 직접 추가
+        if trig == "RevealCondition":
+            def _save(d): lst.append(d); self._refresh_all_triggers(); self._refresh_card_list()
+            ConditionDialog(self.root, {}, _save); return
+        CommandDialog(self.root, {}, lambda d: (lst.append(d),
+                                                self._refresh_all_triggers(),
+                                                self._refresh_card_list()))
 
-    def add_component(self):
-        if self.current_eff_index == -1: return
-        ComponentEditor(self.root, self.schema_config, {}, lambda d: self.save_comp(d, -1))
-    def edit_component(self):
-        sel = self.comp_tree.selection()
-        if sel:
-            idx = int(sel[0])
-            data = self.effects_data["effects"][self.current_eff_index]["components"][idx]
-            ComponentEditor(self.root, self.schema_config, data, lambda d: self.save_comp(d, idx))
-    def remove_component(self):
-        sel = self.comp_tree.selection()
-        if sel:
-            del self.effects_data["effects"][self.current_eff_index]["components"][int(sel[0])]
-            self.on_effect_select(None)
-    def save_comp(self, data, idx):
-        comps = self.effects_data["effects"][self.current_eff_index]["components"]
-        if idx == -1: comps.append(data)
-        else: comps[idx] = data
-        self.on_effect_select(None)
+    def _edit_command(self, trig):
+        lst = self._get_trigger_list(trig)
+        if lst is None: return
+        sel = self.trigger_pages[trig]["lst"].curselection()
+        if not sel: return
+        idx = sel[0]
+        if trig == "RevealCondition":
+            def _save(d): lst[idx] = d; self._refresh_all_triggers()
+            ConditionDialog(self.root, lst[idx], _save); return
+        CommandDialog(self.root, lst[idx],
+                      lambda d: (lst.__setitem__(idx, d), self._refresh_all_triggers()))
 
-    def setup_bindings_tab(self):
-        frame = ttk.Frame(self.tab_bindings)
-        frame.pack(fill="both", expand=True, padx=10, pady=10)
-        self.bind_tree = ttk.Treeview(frame, columns=("CardID", "CardName", "BoundEffectID"), show="headings")
-        self.bind_tree.heading("CardID", text="ID"); self.bind_tree.heading("CardName", text="Name"); self.bind_tree.heading("BoundEffectID", text="Bound Effect")
-        self.bind_tree.pack(fill="both", expand=True)
-        self.bind_tree.bind("<<TreeviewSelect>>", self.on_binding_select)
+    def _remove_command(self, trig):
+        lst = self._get_trigger_list(trig)
+        if lst is None: return
+        sel = self.trigger_pages[trig]["lst"].curselection()
+        if not sel: return
+        del lst[sel[0]]
+        if not lst:
+            self.effects[self.selected_id].pop(trig, None)
+            if not self.effects[self.selected_id]:
+                self.effects.pop(self.selected_id, None)
+        self._refresh_all_triggers()
+        self._refresh_card_list()
 
-        edit_frame = ttk.Frame(frame)
-        edit_frame.pack(fill="x", pady=5)
-        ttk.Label(edit_frame, text="Bind Effect: ").pack(side="left")
-        self.var_bind_eff = tk.StringVar()
-        self.combo_bind_eff = ttk.Combobox(edit_frame, textvariable=self.var_bind_eff, state="readonly")
-        self.combo_bind_eff.pack(side="left")
-        ttk.Button(edit_frame, text="Bind", command=self.apply_binding).pack(side="left")
-        ttk.Button(edit_frame, text="Unbind", command=self.remove_binding).pack(side="left")
-        self.refresh_bindings()
+    def _move_command(self, trig, dx):
+        lst = self._get_trigger_list(trig)
+        if lst is None: return
+        sel = self.trigger_pages[trig]["lst"].curselection()
+        if not sel: return
+        i = sel[0]; j = i + dx
+        if 0 <= j < len(lst):
+            lst[i], lst[j] = lst[j], lst[i]
+            self._refresh_all_triggers()
+            self.trigger_pages[trig]["lst"].selection_set(j)
 
-    def refresh_bindings(self):
-        self.combo_bind_eff["values"] = [e["id"] for e in self.effects_data["effects"]]
-        for item in self.bind_tree.get_children(): self.bind_tree.delete(item)
-        bind_map = {b["cardId"]: b["effectId"] for b in self.effects_data["cardBindings"]}
-        for cid in sorted(list(set(self.card_db.keys()) | set(bind_map.keys()))):
-            self.bind_tree.insert("", "end", values=(cid, self.card_db.get(cid, "Unknown"), bind_map.get(cid, "-")))
-    def on_binding_select(self, e):
-        sel = self.bind_tree.selection()
-        if sel: self.var_bind_eff.set(self.bind_tree.item(sel[0])["values"][2] if self.bind_tree.item(sel[0])["values"][2] != "-" else "")
-    def apply_binding(self):
-        sel = self.bind_tree.selection()
-        if sel:
-            cid = int(self.bind_tree.item(sel[0])["values"][0])
-            self.effects_data["cardBindings"] = [b for b in self.effects_data["cardBindings"] if b["cardId"] != cid]
-            if self.var_bind_eff.get(): self.effects_data["cardBindings"].append({"cardId": cid, "effectId": self.var_bind_eff.get()})
-            self.refresh_bindings()
-    def remove_binding(self):
-        sel = self.bind_tree.selection()
-        if sel:
-            cid = int(self.bind_tree.item(sel[0])["values"][0])
-            self.effects_data["cardBindings"] = [b for b in self.effects_data["cardBindings"] if b["cardId"] != cid]
-            self.refresh_bindings()
+    def _clear_trigger(self, trig):
+        if self.selected_id is None: return
+        if self.selected_id not in self.effects: return
+        if trig not in self.effects[self.selected_id]: return
+        if not messagebox.askyesno("Clear", f"{trig} 전체를 비울까요?"): return
+        self.effects[self.selected_id].pop(trig, None)
+        if not self.effects[self.selected_id]:
+            self.effects.pop(self.selected_id, None)
+        self._refresh_all_triggers()
+        self._refresh_card_list()
 
-class ComponentEditor:
-    def __init__(self, parent, schema, data, callback):
-        self.window = tk.Toplevel(parent)
-        self.window.title("Component Editor")
-        self.schema = schema; self.data = copy.deepcopy(data); self.callback = callback
-        
-        kf = ttk.Frame(self.window); kf.pack(fill="x", padx=5)
-        ttk.Label(kf, text="Kind:").pack(side="left")
-        self.var_kind = tk.StringVar(value=self.data.get("kind", "trigger"))
-        self.cb_kind = ttk.Combobox(kf, textvariable=self.var_kind, values=schema["Kinds"])
-        self.cb_kind.pack(side="left", fill="x", expand=True)
-        self.create_mod_buttons(kf, "Kinds", self.cb_kind, self.var_kind)
 
-        tf = ttk.Frame(self.window); tf.pack(fill="x", padx=5)
-        ttk.Label(tf, text="Timing:").pack(side="left")
-        self.var_timing = tk.StringVar(value=self.data.get("timing", "OnGameStart"))
-        self.cb_timing = ttk.Combobox(tf, textvariable=self.var_timing, values=schema["Timings"])
-        self.cb_timing.pack(side="left", fill="x", expand=True)
-        self.create_mod_buttons(tf, "Timings", self.cb_timing, self.var_timing)
+class ConditionDialog:
+    """RevealCondition 트리거가 condition 객체를 직접 담기에 별도 다이얼로그."""
+    def __init__(self, parent, data, on_save):
+        self.on_save = on_save
+        self.win = tk.Toplevel(parent)
+        self.win.title("Condition")
+        self.win.geometry("520x420")
 
-        af = ttk.LabelFrame(self.window, text="Actions"); af.pack(fill="both", expand=True, padx=5)
-        self.lst_act = tk.Listbox(af); self.lst_act.pack(fill="both", expand=True)
-        
-        # [요청 2] 더블 클릭 시 편집
-        self.lst_act.bind("<Double-1>", lambda e: self.edit_act())
-        
-        bf = ttk.Frame(af); bf.pack(fill="x")
-        ttk.Button(bf, text="Add Action", command=self.add_act).pack(side="left")
-        ttk.Button(bf, text="Edit", command=self.edit_act).pack(side="left")
-        ttk.Button(bf, text="Del", command=self.del_act).pack(side="left")
-        
-        ttk.Button(self.window, text="Save", command=self.save).pack(pady=5)
-        self.refresh()
+        self.cond = ConditionWidget(self.win, value=data); self.cond.pack(fill="both", expand=True, padx=8, pady=8)
 
-    def create_mod_buttons(self, parent, schema_key, combo, var):
-        def add_item():
-            val = simpledialog.askstring("Add", f"New {schema_key} item:")
-            if val and val not in self.schema[schema_key]:
-                self.schema[schema_key].append(val)
-                combo["values"] = self.schema[schema_key]
-                var.set(val)
-        def del_item():
-            val = var.get()
-            if val in self.schema[schema_key]:
-                self.schema[schema_key].remove(val)
-                combo["values"] = self.schema[schema_key]
-                var.set("")
-        ttk.Button(parent, text="[+]", width=3, command=add_item).pack(side="left")
-        ttk.Button(parent, text="[-]", width=3, command=del_item).pack(side="left")
+        bf = ttk.Frame(self.win); bf.pack(fill="x", pady=6)
+        ttk.Button(bf, text="Save", command=self._save).pack(side="right", padx=6)
+        ttk.Button(bf, text="Cancel", command=self.win.destroy).pack(side="right")
 
-    def refresh(self):
-        self.lst_act.delete(0, tk.END)
-        acts = self.data.get("actions", [])
-        if not acts and "replaceWith" in self.data: acts = self.data["replaceWith"]
-        for a in acts: self.lst_act.insert(tk.END, a.get("action"))
-    def add_act(self):
-        GenericDetailEditor(self.window, self.schema, "ActionTypes", {}, lambda d: self.upd_act(d, -1))
-    def edit_act(self):
-        sel = self.lst_act.curselection()
-        if sel:
-            acts = self.data.get("actions", [])
-            if not acts and "replaceWith" in self.data: acts = self.data["replaceWith"]
-            GenericDetailEditor(self.window, self.schema, "ActionTypes", acts[sel[0]], lambda d: self.upd_act(d, sel[0]))
-    def del_act(self):
-        sel = self.lst_act.curselection()
-        if sel:
-            k = "replaceWith" if self.var_kind.get() == "replacement" else "actions"
-            if k in self.data: del self.data[k][sel[0]]; self.refresh()
-    def upd_act(self, item, idx):
-        k = "replaceWith" if self.var_kind.get() == "replacement" else "actions"
-        if k not in self.data: self.data[k] = []
-        if idx == -1: self.data[k].append(item)
-        else: self.data[k][idx] = item
-        self.refresh()
-    def save(self):
-        self.data["kind"] = self.var_kind.get()
-        self.data["timing"] = self.var_timing.get()
-        self.callback(self.data)
-        self.window.destroy()
+    def _save(self):
+        self.on_save(self.cond.get()); self.win.destroy()
 
-class GenericDetailEditor:
-    def __init__(self, parent, schema, schema_key, data, callback):
-        self.window = tk.Toplevel(parent); self.window.title("Detail Editor")
-        self.schema = schema; self.schema_key = schema_key
-        self.data = copy.deepcopy(data); self.callback = callback
-        self.widgets = {}
-
-        keys = list(schema[schema_key].keys())
-        type_key = "type" if schema_key == "ConditionTypes" else "action"
-        
-        tf = ttk.Frame(self.window); tf.pack(fill="x", padx=5, pady=5)
-        ttk.Label(tf, text="Type:").pack(side="left")
-        self.var_type = tk.StringVar(value=self.data.get(type_key, keys[0]))
-        self.cb_type = ttk.Combobox(tf, textvariable=self.var_type, values=keys, state="readonly")
-        self.cb_type.pack(side="left", fill="x", expand=True)
-        self.cb_type.bind("<<ComboboxSelected>>", self.on_type_change)
-        self.create_mod_buttons(tf, schema_key, self.cb_type, self.var_type)
-
-        self.p_frame = ttk.LabelFrame(self.window, text="Parameters"); self.p_frame.pack(fill="both", expand=True, padx=5)
-        ttk.Button(self.window, text="Save", command=self.save).pack(pady=5)
-        self.on_type_change(None)
-
-    def create_mod_buttons(self, parent, schema_key, combo, var):
-        def add_item():
-            val = simpledialog.askstring("Add", f"New Type Name:")
-            if val and val not in self.schema[schema_key]:
-                self.schema[schema_key][val] = {"fields": []}
-                combo["values"] = list(self.schema[schema_key].keys())
-                var.set(val)
-                self.on_type_change(None)
-        def del_item():
-            val = var.get()
-            if val in self.schema[schema_key]:
-                del self.schema[schema_key][val]
-                combo["values"] = list(self.schema[schema_key].keys())
-                var.set("")
-                self.on_type_change(None)
-        ttk.Button(parent, text="[+]", width=3, command=add_item).pack(side="left")
-        ttk.Button(parent, text="[-]", width=3, command=del_item).pack(side="left")
-
-    def on_type_change(self, event):
-        for w in self.p_frame.winfo_children(): w.destroy()
-        self.widgets = {}
-        t = self.var_type.get()
-        if not t: return
-        fields = self.schema[self.schema_key].get(t, {}).get("fields", [])
-
-        for f in fields:
-            fdef = self.schema["FieldDefinitions"].get(f, {"type": "string"})
-            row = ttk.Frame(self.p_frame); row.pack(fill="x", pady=2)
-            ttk.Label(row, text=f+":", width=15).pack(side="left")
-            
-            ftype = fdef.get("type", "string")
-            val = self.data.get(f, fdef.get("default"))
-
-            if ftype in ["selection", "selection_custom"]:
-                var = tk.StringVar(value=str(val))
-                cb = ttk.Combobox(row, textvariable=var, values=fdef.get("values", []))
-                cb.pack(side="left", fill="x", expand=True)
-                self.widgets[f] = (var, ftype)
-            elif ftype == "condition_object":
-                lbl = ttk.Label(row, text=val.get("type", "None") if val else "None")
-                lbl.pack(side="left", padx=5)
-                self.widgets[f] = (val if val else {}, ftype, fdef.get("save_key"), lbl)
-                def open_sub_cond(target, label):
-                    GenericDetailEditor(self.window, self.schema, "ConditionTypes", target,
-                                        lambda d: self.upd_nested_dict(target, d, label))
-                ttk.Button(row, text="Edit", command=lambda v=self.widgets[f][0], l=lbl: open_sub_cond(v, l)).pack(side="left")
-            elif ftype == "action_list":
-                lbl = ttk.Label(row, text=f"{len(val)} actions" if val else "0 actions")
-                lbl.pack(side="left", padx=5)
-                self.widgets[f] = (val if val else [], ftype, fdef.get("save_key"), lbl)
-                def open_sub_list(target, label):
-                    NestedListEditor(self.window, self.schema, "ActionTypes", target,
-                                     lambda l: self.upd_nested_list(target, l, label))
-                ttk.Button(row, text="Edit", command=lambda v=self.widgets[f][0], l=lbl: open_sub_list(v, l)).pack(side="left")
-            elif ftype == "fixed":
-                v = fdef["value"]; ttk.Label(row, text=v, font="bold").pack(side="left")
-                self.widgets[f] = (v, ftype, fdef.get("save_key"))
-            elif ftype == "stat_comparison":
-                parts = fdef["parts"]; sval = str(val); v1, v2 = parts[0][0], parts[1][0]
-                for p in parts[0]:
-                    if sval.startswith(p): v1 = p; v2 = sval[len(p):]; break
-                var1, var2 = tk.StringVar(value=v1), tk.StringVar(value=v2)
-                ttk.Combobox(row, textvariable=var1, values=parts[0], width=10).pack(side="left")
-                ttk.Combobox(row, textvariable=var2, values=parts[1], width=10).pack(side="left")
-                self.widgets[f] = ([var1, var2], ftype)
-            elif ftype == "exile_mode_selector":
-                # [요청 1] 3가지 모드 지원 (CanSelect, CantSelect, AllPlayers)
-                modes = fdef["modes"]
-                current_mode = modes[0] # Default
-                if val in modes: current_mode = val
-                else: current_mode = modes[1] # CantSelectTarget (Auto)
-
-                c, s = fdef["comparators"][0], fdef["stats"][0]
-                if current_mode == modes[1]: # Auto (CantSelect)
-                    for cmp in fdef["comparators"]:
-                        if str(val).startswith(cmp): c = cmp; s = str(val)[len(cmp):]; break
-                
-                vm, vc, vs = tk.StringVar(value=current_mode), tk.StringVar(value=c), tk.StringVar(value=s)
-                ttk.Combobox(row, textvariable=vm, values=modes, width=15).pack(side="left")
-                c1 = ttk.Combobox(row, textvariable=vc, values=fdef["comparators"], width=8)
-                c1.pack(side="left")
-                c2 = ttk.Combobox(row, textvariable=vs, values=fdef["stats"], width=8)
-                c2.pack(side="left")
-                
-                def toggle(*a): 
-                    # CantSelectTarget일 때만 비교/스탯 활성화
-                    is_auto = (vm.get() == modes[1]) 
-                    st = "!disabled" if is_auto else "disabled"
-                    c1.state([st]); c2.state([st])
-                
-                vm.trace_add("write", toggle); toggle()
-                self.widgets[f] = ([vm, vc, vs], ftype, modes)
-            else:
-                var = tk.StringVar(value=str(val))
-                ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
-                self.widgets[f] = (var, ftype)
-
-    def upd_nested_dict(self, target, new_dict, label):
-        target.clear(); target.update(new_dict)
-        label.config(text=new_dict.get("type", "Set"))
-    def upd_nested_list(self, target, new_list, label):
-        target[:] = new_list
-        label.config(text=f"{len(target)} actions")
-
-    def save(self):
-        type_key = "type" if self.schema_key == "ConditionTypes" else "action"
-        res = {type_key: self.var_type.get()}
-        for f, val_data in self.widgets.items():
-            holder, ftype, *ex = val_data
-            if ftype == "fixed": res[ex[0]] = holder
-            elif ftype == "stat_comparison": res[f] = f"{holder[0].get()}{holder[1].get()}"
-            elif ftype == "exile_mode_selector":
-                # [요청 1] 저장 로직: Auto가 아니면 모드명 그대로 저장
-                mode_val = holder[0].get()
-                modes = ex[0]
-                if mode_val == modes[1]: # CantSelectTarget (Auto)
-                    res[f] = f"{holder[1].get()}{holder[2].get()}"
-                else: # CanSelectTarget or AllPlayers
-                    res[f] = mode_val
-            elif ftype == "action_list": res[ex[0]] = holder
-            elif ftype == "condition_object": res[ex[0]] = holder
-            else:
-                v = holder.get()
-                if ftype == "int": 
-                    try: res[f] = int(v)
-                    except: res[f] = 0
-                else: res[f] = v
-        self.callback(res)
-        self.window.destroy()
-
-class NestedListEditor:
-    def __init__(self, parent, schema, schema_key, data_list, callback):
-        self.window = tk.Toplevel(parent); self.window.geometry("400x400")
-        self.schema = schema; self.schema_key = schema_key
-        self.data_list = copy.deepcopy(data_list); self.callback = callback
-        
-        self.lst = tk.Listbox(self.window); self.lst.pack(fill="both", expand=True)
-        
-        # [요청 2] 더블 클릭 시 편집
-        self.lst.bind("<Double-1>", lambda e: self.edit())
-        
-        bf = ttk.Frame(self.window); bf.pack(fill="x")
-        ttk.Button(bf, text="+", command=self.add).pack(side="left")
-        ttk.Button(bf, text="Edit", command=self.edit).pack(side="left")
-        ttk.Button(bf, text="-", command=self.dele).pack(side="left")
-        ttk.Button(self.window, text="OK", command=self.ok).pack()
-        self.refresh()
-
-    def refresh(self):
-        self.lst.delete(0, tk.END)
-        k = "type" if self.schema_key == "ConditionTypes" else "action"
-        for i in self.data_list: self.lst.insert(tk.END, i.get(k, "?"))
-    def add(self):
-        GenericDetailEditor(self.window, self.schema, self.schema_key, {}, lambda d: self.upd(d, -1))
-    def edit(self):
-        sel = self.lst.curselection()
-        if sel: GenericDetailEditor(self.window, self.schema, self.schema_key, self.data_list[sel[0]], lambda d: self.upd(d, sel[0]))
-    def dele(self):
-        sel = self.lst.curselection()
-        if sel: del self.data_list[sel[0]]; self.refresh()
-    def upd(self, d, i):
-        if i == -1: self.data_list.append(d)
-        else: self.data_list[i] = d
-        self.refresh()
-    def ok(self):
-        self.callback(self.data_list); self.window.destroy()
 
 if __name__ == "__main__":
     root = tk.Tk()
-    app = CardEditorApp(root)
+    EffectsEditorApp(root)
     root.mainloop()
